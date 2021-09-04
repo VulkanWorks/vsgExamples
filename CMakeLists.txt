@@ -2,9 +2,11 @@ cmake_minimum_required(VERSION 3.7)
 
 project(vsgExamples
         VERSION 0.0.0
-        DESCRIPTION "Set of example programs that test and illustrate how to use the Vulkan/VkSceneGraph"
+        DESCRIPTION "Set of example programs that test and illustrate how to use the VulkanSceneGraph"
         LANGUAGES CXX C
 )
+
+SET(vsgExamples_RELEASE_CANDIDATE 0)
 
 # build all examples into the bin directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
@@ -21,7 +23,7 @@ endif()
 
 find_package(vsg REQUIRED)
 
-# find the optional vsgXchange that can be used for reading and range of image and 3d model formats and shader compilation
+# find the optional vsgExamples that can be used for reading and range of image and 3d model formats and shader compilation
 find_package(vsgXchange QUIET)
 
 # find the optional vsgImGui that can be used for GUI elements added into graphics window.
@@ -45,6 +47,48 @@ if (CLANGFORMAT)
     )
 endif()
 
+option(MAINTAINER "Enable maintainer build methods, such as making git branches and tags." OFF)
+if (MAINTAINER)
+
+    #
+    # Provide target for tagging a release
+    #
+    SET(BASE_NAME vsgExamples)
+    SET(vsgExamples_BRANCH ${BASE_NAME}-${vsgExamples_VERSION_MAJOR}.${vsgExamples_VERSION_MINOR})
+
+    SET(GITCOMMAND git)
+
+    IF   (vsgExamples_RELEASE_CANDIDATE EQUAL 0)
+        SET(RELEASE_NAME ${BASE_NAME}-${vsgExamples_VERSION})
+    ELSE()
+        SET(RELEASE_NAME ${BASE_NAME}-${vsgExamples_VERSION}-rc${vsgExamples_RELEASE_CANDIDATE})
+    ENDIF()
+
+    SET(RELEASE_MESSAGE "Release ${RELEASE_NAME}")
+    SET(BRANCH_MESSAGE "Branch ${vsgExamples_BRANCH}")
+
+    add_custom_target(tag-test
+        COMMAND echo ${GITCOMMAND} tag -a ${RELEASE_NAME} -m ${RELEASE_MESSAGE}
+        COMMAND echo ${GITCOMMAND} push origin ${RELEASE_NAME}
+    )
+
+    add_custom_target(tag-run
+        COMMAND ${GITCOMMAND} tag -a ${RELEASE_NAME} -m ${RELEASE_MESSAGE}
+        COMMAND ${GITCOMMAND} push origin ${RELEASE_NAME}
+    )
+
+    add_custom_target(branch-test
+        COMMAND echo ${GITCOMMAND} branch ${vsgExamples_BRANCH}
+        COMMAND echo ${GITCOMMAND} push origin ${vsgExamples_BRANCH}
+    )
+
+    add_custom_target(branch-run
+        COMMAND ${GITCOMMAND} branch ${vsgExamples_BRANCH}
+        COMMAND ${GITCOMMAND} push origin ${vsgExamples_BRANCH}
+    )
+
+endif()
+
 # pure VSG examples
 add_subdirectory(examples/core)
 add_subdirectory(examples/maths)
@@ -58,6 +102,8 @@ add_subdirectory(examples/threading)
 add_subdirectory(examples/viewer)
 add_subdirectory(examples/vk)
 add_subdirectory(examples/text)
+add_subdirectory(examples/rtx)
 add_subdirectory(examples/raytracing)
 add_subdirectory(examples/introspection)
 add_subdirectory(examples/platform)
+add_subdirectory(examples/utils)

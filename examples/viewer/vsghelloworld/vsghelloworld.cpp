@@ -9,7 +9,7 @@ int main(int argc, char** argv)
     // set up vsg::Options to pass in filepaths and ReaderWriter's and other IO realted options to use when reading and writing files.
     auto options = vsg::Options::create(vsgXchange::all::create());
     options->fileCache = vsg::getEnv("VSG_FILE_CACHE");
-    options->paths = vsg::getEnvPaths("VSG_FILE_FILE");
+    options->paths = vsg::getEnvPaths("VSG_FILE_PATH");
     arguments.read(options);
 
     vsg::Path filename = "https://raw.githubusercontent.com/robertosfield/TestData/master/Earth_VSG/earth.vsgb";
@@ -45,7 +45,8 @@ int main(int argc, char** argv)
     auto lookAt = vsg::LookAt::create(centre + vsg::dvec3(0.0, -radius * 3.5, 0.0), centre, vsg::dvec3(0.0, 0.0, 1.0));
 
     vsg::ref_ptr<vsg::ProjectionMatrix> perspective;
-    if (vsg::ref_ptr<vsg::EllipsoidModel> ellipsoidModel(vsg_scene->getObject<vsg::EllipsoidModel>("EllipsoidModel")); ellipsoidModel)
+    vsg::ref_ptr<vsg::EllipsoidModel> ellipsoidModel(vsg_scene->getObject<vsg::EllipsoidModel>("EllipsoidModel"));
+    if (ellipsoidModel)
     {
         double horizonMountainHeight = 0.0;
         perspective = vsg::EllipsoidPerspective::create(lookAt, ellipsoidModel, 30.0, static_cast<double>(window->extent2D().width) / static_cast<double>(window->extent2D().height), nearFarRatio, horizonMountainHeight);
@@ -61,7 +62,7 @@ int main(int argc, char** argv)
     viewer->addEventHandler(vsg::CloseHandler::create(viewer));
 
     // add trackball to control the Camera
-    viewer->addEventHandler(vsg::Trackball::create(camera));
+    viewer->addEventHandler(vsg::Trackball::create(camera, ellipsoidModel));
 
     // add the CommandGraph to render the scene
     auto commandGraph = vsg::createCommandGraphForView(window, camera, vsg_scene);

@@ -6,7 +6,7 @@ Example programs that test and illustrate how to use the [VulkanSceneGraph](http
 * [viewer](examples/viewer/) examples
 * [vk](examples/vk/) examples
 * [text](examples/text/) examples
-* [raytracing](examples/raytracing/) examples
+* [rtx](examples/rtx/) examples
 * [state](examples/state/) examples
 * [commands](examples/commands/) examples
 * [introspection](examples/introspection/) examples
@@ -14,6 +14,7 @@ Example programs that test and illustrate how to use the [VulkanSceneGraph](http
 * [ui](examples/ui/) examples
 * [traversals](examples/traversals/) examples
 * [platform](examples/platform/) examples
+* [utils](examples/utils/) examples
 
 ## Quick Guide to Building the vsgExamples
 

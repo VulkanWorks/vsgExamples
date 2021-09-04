@@ -323,16 +323,15 @@ int main(int argc, char** argv)
     using VsgNodes = std::vector<vsg::ref_ptr<vsg::Node>>;
     VsgNodes vsgNodes;
 
-    vsg::Path path;
+    auto options = vsg::Options::create();
+    options->fileCache = vsg::getEnv("VSG_FILE_CACHE");
+    options->paths = vsg::getEnvPaths("VSG_FILE_PATH");
 
     // read any vsg files
     for (int i = 1; i < argc; ++i)
     {
         vsg::Path filename = arguments[i];
-
-        path = vsg::filePath(filename);
-
-        auto loaded_scene = vsg::read_cast<vsg::Node>(filename);
+        auto loaded_scene = vsg::read_cast<vsg::Node>(filename, options);
         if (loaded_scene)
         {
             vsgNodes.push_back(loaded_scene);
@@ -446,7 +445,7 @@ int main(int argc, char** argv)
 
         // animate the offscreen scenegraph
         float time = std::chrono::duration<float, std::chrono::seconds::period>(viewer->getFrameStamp()->time - viewer->start_point()).count();
-        transform->setMatrix(vsg::rotate(time * vsg::radians(90.0f), vsg::vec3(0.0f, 0.0, 1.0f)));
+        transform->matrix = vsg::rotate(time * vsg::radians(90.0f), vsg::vec3(0.0f, 0.0, 1.0f));
 
         viewer->update();
 

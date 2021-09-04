@@ -320,7 +320,7 @@ public:
         auto destinationBuffer = vsg::createBufferAndMemory(device, bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
         auto destinationMemory = destinationBuffer->getDeviceMemory(device->deviceID);
 
-        VkImageAspectFlags imageAspectFlags = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        VkImageAspectFlags imageAspectFlags = VK_IMAGE_ASPECT_DEPTH_BIT; // | VK_IMAGE_ASPECT_STENCIL_BIT; // need to match imageAspectFlags setting to WindowTraits::depthFormat.
 
         // 2.a) tranition depth image for reading
         auto commands = vsg::Commands::create();
@@ -521,6 +521,8 @@ int main(int argc, char** argv)
 
     vsg::Path filename;
     if (argc > 1) filename = arguments[1];
+    options->fileCache = vsg::getEnv("VSG_FILE_CACHE");
+    options->paths = vsg::getEnvPaths("VSG_FILE_PATH");
 
     auto vsg_scene = vsg::read_cast<vsg::Node>(filename, options);
     if (!vsg_scene)
@@ -572,7 +574,7 @@ int main(int argc, char** argv)
 
     viewer->addEventHandler(vsg::Trackball::create(camera));
 
-    vsg::ref_ptr<vsg::Event> event = vsg::Event::create(window->getOrCreateDevice()); // Vulkan creates vkEvent in an unsignled state
+    auto event = vsg::Event::create(window->getOrCreateDevice()); // Vulkan creates vkEvent in an unsignled state
 
     // Add ScreenshotHandler to respond to keyboard and mouse events.
     auto screenshotHandler = ScreenshotHandler::create(event);
