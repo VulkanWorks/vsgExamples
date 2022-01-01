@@ -6,26 +6,29 @@
 
 #include <iostream>
 
-
 class IntersectionHandler : public vsg::Inherit<vsg::Visitor, IntersectionHandler>
 {
 public:
+    vsg::GeometryInfo geom;
+    vsg::StateInfo state;
+
     vsg::ref_ptr<vsg::Builder> builder;
     vsg::ref_ptr<vsg::Options> options;
     vsg::ref_ptr<vsg::Camera> camera;
     vsg::ref_ptr<vsg::Group> scenegraph;
     vsg::ref_ptr<vsg::EllipsoidModel> ellipsoidModel;
     double scale = 1.0;
-    bool verbose = false;
+    bool verbose = true;
 
     IntersectionHandler(vsg::ref_ptr<vsg::Builder> in_builder, vsg::ref_ptr<vsg::Camera> in_camera, vsg::ref_ptr<vsg::Group> in_scenegraph, vsg::ref_ptr<vsg::EllipsoidModel> in_ellipsoidModel, double in_scale, vsg::ref_ptr<vsg::Options> in_options) :
         builder(in_builder),
+        options(in_options),
         camera(in_camera),
         scenegraph(in_scenegraph),
         ellipsoidModel(in_ellipsoidModel),
-        scale(in_scale),
-        options(in_options)
+        scale(in_scale)
     {
+        builder->verbose = verbose;
         if (scale > 10.0) scale = 10.0;
     }
 
@@ -36,39 +39,39 @@ public:
             interesection(*lastPointerEvent);
             if (!lastIntersection) return;
 
-            vsg::GeometryInfo info;
-            info.position = vsg::vec3(lastIntersection.worldIntersection);
-            info.dx.set(scale, 0.0f, 0.0f);
-            info.dy.set(0.0f, scale, 0.0f);
-            info.dz.set(0.0f, 0.0f, scale);
-
-            // info.image = vsg::read_cast<vsg::Data>("textures/lz.vsgb", options);
+            geom.position = vsg::vec3(lastIntersection.worldIntersection);
+            geom.dx.set(scale, 0.0f, 0.0f);
+            geom.dy.set(0.0f, scale, 0.0f);
+            geom.dz.set(0.0f, 0.0f, scale);
 
             if (keyPress.keyBase == 'b')
             {
-                scenegraph->addChild(builder->createBox(info));
+                scenegraph->addChild(builder->createBox(geom, state));
             }
             else if (keyPress.keyBase == 'q')
             {
-                scenegraph->addChild(builder->createQuad(info));
+                scenegraph->addChild(builder->createQuad(geom, state));
             }
             else if (keyPress.keyBase == 'c')
             {
-                scenegraph->addChild(builder->createCylinder(info));
+                scenegraph->addChild(builder->createCylinder(geom, state));
             }
             else if (keyPress.keyBase == 'p')
             {
-                scenegraph->addChild(builder->createCapsule(info));
+                scenegraph->addChild(builder->createCapsule(geom, state));
             }
             else if (keyPress.keyBase == 's')
             {
-                scenegraph->addChild(builder->createSphere(info));
+                scenegraph->addChild(builder->createSphere(geom, state));
             }
             else if (keyPress.keyBase == 'n')
             {
-                scenegraph->addChild(builder->createCone(info));
+                scenegraph->addChild(builder->createCone(geom, state));
             }
-
+            else if (keyPress.keyBase == 'o')
+            {
+                vsg::write(scenegraph, "builder.vsgt");
+            }
         }
     }
 
@@ -92,7 +95,7 @@ public:
         auto intersector = vsg::LineSegmentIntersector::create(*camera, pointerEvent.x, pointerEvent.y);
         scenegraph->accept(*intersector);
 
-        if (verbose) std::cout << "interesection(" << pointerEvent.x << ", " << pointerEvent.y << ") " << intersector->intersections.size() << ")" << std::endl;
+        if (verbose) std::cout << "intersection(" << pointerEvent.x << ", " << pointerEvent.y << ") " << intersector->intersections.size() << ")" << std::endl;
 
         if (intersector->intersections.empty()) return;
 
@@ -167,6 +170,7 @@ int main(int argc, char** argv)
     if (arguments.read({"--window", "-w"}, windowTraits->width, windowTraits->height)) { windowTraits->fullscreen = false; }
     auto pointOfInterest = arguments.value(vsg::dvec3(0.0, 0.0, std::numeric_limits<double>::max()), "--poi");
     auto horizonMountainHeight = arguments.value(0.0, "--hmh");
+    vsg::Path textureFile = arguments.value<std::string>("", "-t");
 
     if (arguments.errors()) return arguments.writeErrorMessages(std::cerr);
 
@@ -189,17 +193,19 @@ int main(int argc, char** argv)
         }
     }
 
+    vsg::StateInfo stateInfo;
+
+    if (!textureFile.empty())
+    {
+        stateInfo.image = vsg::read_cast<vsg::Data>(textureFile, options);
+    }
+
     if (scene->children.empty())
     {
         vsg::GeometryInfo info;
         info.dx.set(100.0f, 0.0f, 0.0f);
         info.dy.set(0.0f, 100.0f, 0.0f);
         info.dz.set(0.0f, 0.0f, 100.0f);
-
-        vsg::StateInfo stateInfo;
-        vsg::Path textureFile("textures/lz.vsgb");
-        stateInfo.image = vsg::read_cast<vsg::Data>(textureFile, options);
-
         scene->addChild(builder->createBox(info, stateInfo));
     }
 
@@ -220,9 +226,7 @@ int main(int argc, char** argv)
     // compute the bounds of the scene graph to help position camera
     vsg::ComputeBounds computeBounds;
     scene->accept(computeBounds);
-    vsg::dvec3 centre = (computeBounds.bounds.min + computeBounds.bounds.max) * 0.5;
     double radius = vsg::length(computeBounds.bounds.max - computeBounds.bounds.min) * 0.6;
-
     if (pointOfInterest[2] != std::numeric_limits<double>::max())
     {
         if (ellipsoidModel)
@@ -235,7 +239,7 @@ int main(int argc, char** argv)
             vsg::dvec3 up = vsg::normalize(vsg::cross(ecef_normal, vsg::cross(vsg::dvec3(0.0, 0.0, 1.0), ecef_normal)));
 
             // set up the camera
-            lookAt = vsg::LookAt::create(eye, centre, up);
+            lookAt = vsg::LookAt::create(eye, ecef, up);
         }
         else
         {
@@ -250,6 +254,7 @@ int main(int argc, char** argv)
     else
     {
         // set up the camera
+        vsg::dvec3 centre = (computeBounds.bounds.min + computeBounds.bounds.max) * 0.5;
         lookAt = vsg::LookAt::create(centre + vsg::dvec3(0.0, -radius * 3.5, 0.0), centre, vsg::dvec3(0.0, 0.0, 1.0));
     }
 
@@ -266,7 +271,7 @@ int main(int argc, char** argv)
 
     auto camera = vsg::Camera::create(perspective, lookAt, vsg::ViewportState::create(window->extent2D()));
 
-    // set up the compilation support in builder to allow us to interactively create and compile subgraphs from wtihin the IntersectionHandler
+    // set up the compilation support in builder to allow us to interactively create and compile subgraphs from within the IntersectionHandler
     builder->setup(window, camera->viewportState);
 
     // add close handler to respond the close window button and pressing escape
@@ -274,7 +279,9 @@ int main(int argc, char** argv)
 
     viewer->addEventHandler(vsg::Trackball::create(camera));
 
-    viewer->addEventHandler(IntersectionHandler::create(builder, camera, scene, ellipsoidModel, radius * 0.1, options));
+    auto intersectionHandler = IntersectionHandler::create(builder, camera, scene, ellipsoidModel, radius * 0.1, options);
+    intersectionHandler->state = stateInfo;
+    viewer->addEventHandler(intersectionHandler);
 
     auto commandGraph = vsg::createCommandGraphForView(window, camera, scene);
     viewer->assignRecordAndSubmitTaskAndPresentation({commandGraph});
