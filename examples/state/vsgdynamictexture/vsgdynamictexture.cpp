@@ -66,6 +66,7 @@ int main(int argc, char** argv)
     auto windowTraits = vsg::WindowTraits::create();
     windowTraits->debugLayer = arguments.read({"--debug", "-d"});
     windowTraits->apiDumpLayer = arguments.read({"--api", "-a"});
+    windowTraits->synchronizationLayer = arguments.read("--sync");
     if (arguments.read("--IMMEDIATE")) windowTraits->swapchainPreferences.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
     if (arguments.read("--double-buffer")) windowTraits->swapchainPreferences.imageCount = 2;
     if (arguments.read("--triple-buffer")) windowTraits->swapchainPreferences.imageCount = 3; // default
@@ -73,7 +74,7 @@ int main(int argc, char** argv)
     arguments.read("--window", windowTraits->width, windowTraits->height);
     arguments.read("--screen", windowTraits->screenNum);
     arguments.read("--display", windowTraits->display);
-    if (arguments.read("-t"))
+    if (arguments.read({"-t", "--st"}))
     {
         windowTraits->swapchainPreferences.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
         windowTraits->width = 192, windowTraits->height = 108;
@@ -93,14 +94,15 @@ int main(int argc, char** argv)
     if (arguments.read("--float")) arrayType = USE_FLOAT;
     if (arguments.read("--rgb")) arrayType = USE_RGB;
     if (arguments.read("--rgba")) arrayType = USE_RGBA;
-
     auto image_size = arguments.value<uint32_t>(256, "-s");
+    bool lateTransfer = arguments.read("--late");
+    bool multiThreading = arguments.read("--mt");
 
     vsg::GeometryInfo geomInfo;
     vsg::StateInfo stateInfo;
     stateInfo.wireframe = arguments.read("--wireframe");
     stateInfo.lighting = !arguments.read("--flat");
-    stateInfo.doubleSided = true;
+    stateInfo.two_sided = true;
 
     if (arguments.errors()) return arguments.writeErrorMessages(std::cerr);
 
@@ -144,7 +146,7 @@ int main(int argc, char** argv)
     case (USE_FLOAT):
         // use float image - typically for displacementMap
         textureData = vsg::floatArray2D::create(image_size, image_size);
-        textureData->getLayout().format = VK_FORMAT_R32_SFLOAT;
+        textureData->properties.format = VK_FORMAT_R32_SFLOAT;
         break;
     case (USE_RGB):
         // note, RGB image data has to be converted to RGBA when copying to a vkImage,
@@ -152,14 +154,17 @@ int main(int argc, char** argv)
         // this makes RGB substantially slower than using RGBA data.
         // one approach, illustrated in the vsgdynamictexture_cs example, for avoiding this conversion overhead is to use a compute shader to map the RGB data to RGBA.
         textureData = vsg::vec3Array2D::create(image_size, image_size);
-        textureData->getLayout().format = VK_FORMAT_R32G32B32_SFLOAT;
+        textureData->properties.format = VK_FORMAT_R32G32B32_SFLOAT;
         break;
     case (USE_RGBA):
         // R, RG and RGBA data can be copied to vkImage without any conversion so is efficient, while RGB requires conversion, see below explanation
         textureData = vsg::vec4Array2D::create(image_size, image_size);
-        textureData->getLayout().format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        textureData->properties.format = VK_FORMAT_R32G32B32A32_SFLOAT;
         break;
     }
+
+    // set the dynmaic hint to tell the Viewer::compile() to assign this vsg::Data to a vsg::TransferTask
+    textureData->properties.dataVariance = lateTransfer ? vsg::DYNAMIC_DATA_TRANSFER_AFTER_RECORD : vsg::DYNAMIC_DATA;
 
     // initialize the image
     UpdateImage updateImage;
@@ -183,55 +188,13 @@ int main(int argc, char** argv)
         scenegraph->addChild(builder.createBox(geomInfo, stateInfo));
     }
 
-    auto memoryBufferPools = vsg::MemoryBufferPools::create("Staging_MemoryBufferPool", vsg::ref_ptr<vsg::Device>(window->getOrCreateDevice()));
-    vsg::ref_ptr<vsg::CopyAndReleaseImage> copyImageCmd = vsg::CopyAndReleaseImage::create(memoryBufferPools);
+    auto commandGraph = vsg::createCommandGraphForView(window, camera, scenegraph);
+    viewer->assignRecordAndSubmitTaskAndPresentation({commandGraph});
 
-    // setup command graph to copy the image data each frame then rendering the scene graph
-    {
-        auto grahics_commandGraph = vsg::CommandGraph::create(window);
-        grahics_commandGraph->addChild(copyImageCmd);
-        grahics_commandGraph->addChild(vsg::createRenderGraphForView(window, camera, scenegraph));
-
-        viewer->assignRecordAndSubmitTaskAndPresentation({grahics_commandGraph});
-    }
+    if (multiThreading) viewer->setupThreading();
 
     // compile the Vulkan objects
     viewer->compile();
-
-    // texture has been filled in so it's now safe to get the ImageInfo that holds the handles to the texture's
-    struct FindTexture : public vsg::Visitor
-    {
-        vsg::ref_ptr<vsg::ImageInfo> imageInfo;
-
-        void apply(vsg::Object& object) override
-        {
-            object.traverse(*this);
-        }
-        void apply(vsg::StateGroup& sg) override
-        {
-            for (auto& sc : sg.stateCommands) { sc->accept(*this); }
-            sg.traverse(*this);
-        }
-        void apply(vsg::DescriptorImage& di) override
-        {
-            if (!di.imageInfoList.empty()) imageInfo = di.imageInfoList[0]; // contextID=0, and only one imageData
-        }
-
-        static vsg::ref_ptr<vsg::ImageInfo> find(vsg::Node* node)
-        {
-            FindTexture fdi;
-            node->accept(fdi);
-            return fdi.imageInfo;
-        }
-    };
-
-    auto textureImageInfo = FindTexture::find(scenegraph);
-
-    if (!textureImageInfo || !textureImageInfo->imageView)
-    {
-        std::cout << "Can not locate imageInfo to update." << std::endl;
-        return 1;
-    }
 
     auto startTime = vsg::clock::now();
     double numFramesCompleted = 0.0;
@@ -246,9 +209,6 @@ int main(int argc, char** argv)
 
         // update texture data
         updateImage(textureData, time);
-
-        // copy data to staging buffer and issue a copy command to transfer to the GPU texture image
-        copyImageCmd->copy(textureData, textureImageInfo);
 
         viewer->update();
 

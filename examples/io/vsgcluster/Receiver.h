@@ -25,8 +25,10 @@
 // Class definition for the recipient of a broadcasted message
 //
 
-#if defined(_WIN32) && !defined(__CYGWIN__)
+#if defined(WIN32) && !defined(__CYGWIN__)
+#ifndef NOMINMAX
 #    define NOMINMAX
+#endif
 #    include <winsock.h>
 #else
 #    include <netinet/in.h>
@@ -39,8 +41,8 @@ class Receiver : public vsg::Inherit<vsg::Object, Receiver>
 public:
     Receiver(uint16_t port);
 
-    // Sync does a blocking wait to recieve next message
-    unsigned int recieve(void* buffer, const unsigned int buffer_size);
+    // Sync does a blocking wait to receive next message
+    unsigned int receive(void* buffer, const unsigned int buffer_size);
 
 private:
     bool init(void);
@@ -48,7 +50,7 @@ private:
 private:
     virtual ~Receiver();
 
-#if defined(_WIN32) && !defined(__CYGWIN__)
+#if defined(WIN32) && !defined(__CYGWIN__)
     SOCKET _so;
     SOCKADDR_IN saddr;
 #else

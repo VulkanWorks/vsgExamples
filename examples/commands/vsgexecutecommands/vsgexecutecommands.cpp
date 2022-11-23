@@ -12,21 +12,17 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 #include <vsg/all.h>
 
+#ifdef vsgXchange_FOUND
+#    include <vsgXchange/all.h>
+#endif
+
 #include <iostream>
 
-vsg::ref_ptr<vsg::Node> createScene(std::string filename)
+vsg::ref_ptr<vsg::Node> createScene(vsg::ref_ptr<const vsg::Options> options)
 {
-    if (!filename.empty())
-    {
-        return vsg::read_cast<vsg::Node>(filename);
-    }
-
-    // set up search paths to SPIRV shaders and textures
-    vsg::Paths searchPaths = vsg::getEnvPaths("VSG_FILE_PATH");
-
     // load shaders
-    vsg::ref_ptr<vsg::ShaderStage> vertexShader = vsg::ShaderStage::read(VK_SHADER_STAGE_VERTEX_BIT, "main", vsg::findFile("shaders/vert_PushConstants.spv", searchPaths));
-    vsg::ref_ptr<vsg::ShaderStage> fragmentShader = vsg::ShaderStage::read(VK_SHADER_STAGE_FRAGMENT_BIT, "main", vsg::findFile("shaders/frag_PushConstants.spv", searchPaths));
+    vsg::ref_ptr<vsg::ShaderStage> vertexShader = vsg::ShaderStage::read(VK_SHADER_STAGE_VERTEX_BIT, "main", vsg::findFile("shaders/vert_PushConstants.spv", options));
+    vsg::ref_ptr<vsg::ShaderStage> fragmentShader = vsg::ShaderStage::read(VK_SHADER_STAGE_FRAGMENT_BIT, "main", vsg::findFile("shaders/frag_PushConstants.spv", options));
     if (!vertexShader || !fragmentShader)
     {
         std::cout << "Could not create shaders." << std::endl;
@@ -35,7 +31,7 @@ vsg::ref_ptr<vsg::Node> createScene(std::string filename)
 
     // read texture image
     vsg::Path textureFile("textures/lz.vsgb");
-    auto textureData = vsg::read_cast<vsg::Data>(vsg::findFile(textureFile, searchPaths));
+    auto textureData = vsg::read_cast<vsg::Data>(textureFile, options);
     if (!textureData)
     {
         std::cout << "Could not read texture file : " << textureFile << std::endl;
@@ -149,7 +145,7 @@ int main(int argc, char** argv)
 {
     // set up defaults and read command line arguments to override them
     auto traits = vsg::WindowTraits::create();
-    traits->windowTitle = "vsgexecutecommands";
+    traits->windowTitle = "vsgexecutecommands window1";
     traits->width = 800;
     traits->height = 600;
 
@@ -179,7 +175,17 @@ int main(int argc, char** argv)
     vsg::Path filename;
     if (argc > 1) filename = arguments[1];
 
-    auto vsg_scene = createScene(filename);
+
+    vsg::ref_ptr<vsg::Node> vsg_scene;
+    if (filename)
+    {
+        vsg_scene = vsg::read_cast<vsg::Node>(filename, options);
+    }
+    else
+    {
+        vsg_scene = createScene(options);
+    }
+
     if (!vsg_scene)
     {
         std::cout << "Unable to load model." << std::endl;
@@ -189,16 +195,24 @@ int main(int argc, char** argv)
     // create the viewer and assign window(s) to it
     auto viewer = vsg::Viewer::create();
 
+
     auto window1 = vsg::Window::create(traits);
     if (!window1)
     {
-        std::cout << "Could not create windows." << std::endl;
+        std::cout << "Could not create window1." << std::endl;
         return 1;
     }
 
     auto traits2 = vsg::WindowTraits::create(*traits);
+    traits2->windowTitle = "vsgexecutecommands window2";
     traits2->shareWindow = window1;
+
     auto window2 = vsg::Window::create(traits2);
+    if (!window2)
+    {
+        std::cout << "Could not create window2." << std::endl;
+        return 1;
+    }
 
     viewer->addWindow(window1);
     viewer->addWindow(window2);

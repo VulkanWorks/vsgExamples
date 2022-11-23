@@ -35,8 +35,8 @@ public:
     std::vector<vsg::Object*> parents;
     std::set<vsg::Object*> visited;
     std::map<vsg::BindGraphicsPipeline*, vsg::ref_ptr<vsg::StateSwitch>> pipelineMap;
-    uint32_t mask_1 = 0x1;
-    uint32_t mask_2 = 0x2;
+    vsg::Mask mask_1 = 0x1;
+    vsg::Mask mask_2 = 0x2;
 
     void traverse(vsg::Object& object)
     {
@@ -60,9 +60,7 @@ public:
         {
             if (auto rasterizationState = pipelineState.cast<vsg::RasterizationState>())
             {
-                auto alternate_rasterizationState = vsg::RasterizationState::create();
-
-                *alternate_rasterizationState = *rasterizationState;
+                auto alternate_rasterizationState = vsg::RasterizationState::create(*rasterizationState);
 
                 alternate_rasterizationState->polygonMode = VK_POLYGON_MODE_LINE;
                 pipelineState = alternate_rasterizationState;
@@ -135,8 +133,8 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    uint32_t mask_1 = 0x1;
-    uint32_t mask_2 = 0x2;
+    vsg::Mask mask_1 = 0x1;
+    vsg::Mask mask_2 = 0x2;
 
     // insert StateSwitch in place of BindGraphicsPipeline,
     // with each StateSwitch having one child associated with view_1 that is the original Bind/GraphicsPipeline
@@ -214,7 +212,7 @@ int main(int argc, char** argv)
         VkClearAttachment color_attachment{VK_IMAGE_ASPECT_COLOR_BIT, 0, colorClearValue};
 
         VkClearValue depthClearValue{};
-        depthClearValue.depthStencil = {1.0f, 0};
+        depthClearValue.depthStencil = {0.0f, 0};
         VkClearAttachment depth_attachment{VK_IMAGE_ASPECT_DEPTH_BIT, 1, depthClearValue};
 
         VkClearRect rect{secondary_camera->getRenderArea(), 0, 1};

@@ -21,7 +21,7 @@ int main(int argc, char** argv)
     if (debugLayer)
     {
         instanceExtensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
-        requestedLayers.push_back("VK_LAYER_LUNARG_standard_validation");
+        requestedLayers.push_back("VK_LAYER_KHRONOS_validation");
         if (apiDumpLayer) requestedLayers.push_back("VK_LAYER_LUNARG_api_dump");
     }
 
@@ -83,11 +83,12 @@ int main(int argc, char** argv)
     commandGraph->addChild(vsg::Dispatch::create(uint32_t(ceil(float(width) / float(workgroupSize))), uint32_t(ceil(float(height) / float(workgroupSize))), 1));
 
     // compile the Vulkan objects
-    vsg::CompileTraversal compileTraversal(device);
-    compileTraversal.context.commandPool = vsg::CommandPool::create(device, computeQueueFamily);
-    compileTraversal.context.descriptorPool = vsg::DescriptorPool::create(device, 1, vsg::DescriptorPoolSizes{{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}});
+    auto compileTraversal = vsg::CompileTraversal::create(device);
+    auto context = compileTraversal->contexts.front();
+    context->commandPool = vsg::CommandPool::create(device, computeQueueFamily);
+    // context->descriptorPool = vsg::DescriptorPool::create(device, 1, vsg::DescriptorPoolSizes{{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}});
 
-    commandGraph->accept(compileTraversal);
+    commandGraph->accept(*compileTraversal);
 
     // setup fence
     auto fence = vsg::Fence::create(device);
@@ -95,7 +96,7 @@ int main(int argc, char** argv)
     auto startTime = std::chrono::steady_clock::now();
 
     // submit commands
-    vsg::submitCommandsToQueue(device, compileTraversal.context.commandPool, fence, 100000000000, computeQueue, [&](vsg::CommandBuffer& commandBuffer) {
+    vsg::submitCommandsToQueue(context->commandPool, fence, 100000000000, computeQueue, [&](vsg::CommandBuffer& commandBuffer) {
         commandGraph->record(commandBuffer);
     });
 
@@ -105,7 +106,7 @@ int main(int argc, char** argv)
     if (!outputFilename.empty())
     {
         // Map the buffer memory and assign as a vec4Array2D that will automatically unmap itself on destruction.
-        auto image = vsg::MappedData<vsg::vec4Array2D>::create(bufferMemory, 0, 0, vsg::Data::Layout{VK_FORMAT_R32G32B32A32_SFLOAT}, width, height); // deviceMemory, offset, flags an d dimensions
+        auto image = vsg::MappedData<vsg::vec4Array2D>::create(bufferMemory, 0, 0, vsg::Data::Properties{VK_FORMAT_R32G32B32A32_SFLOAT}, width, height); // deviceMemory, offset, flags an d dimensions
 
         if (outputAsFloat)
         {
@@ -114,7 +115,7 @@ int main(int argc, char** argv)
         else
         {
             // create a unsigned byte version of the image and then copy the texels across converting colours from float to unsigned byte.
-            auto dest = vsg::ubvec4Array2D::create(width, height, vsg::Data::Layout{VK_FORMAT_R8G8B8A8_UNORM});
+            auto dest = vsg::ubvec4Array2D::create(width, height, vsg::Data::Properties{VK_FORMAT_R8G8B8A8_UNORM});
 
             using component_type = uint8_t;
             auto c_itr = dest->begin();

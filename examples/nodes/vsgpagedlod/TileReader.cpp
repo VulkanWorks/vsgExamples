@@ -57,14 +57,14 @@ vsg::ref_ptr<vsg::Object> TileReader::read(const vsg::Path& filename, vsg::ref_p
     auto extension = vsg::lowerCaseFileExtension(filename);
     if (extension != ".tile") return {};
 
-    std::string tile_info = filename.substr(0, filename.length() - 5);
+    auto tile_info = filename.substr(0, filename.length() - 5);
     if (tile_info == "root")
     {
         return read_root(options);
     }
     else
     {
-        std::stringstream sstr(tile_info);
+        std::basic_stringstream<vsg::Path::value_type> sstr(tile_info);
 
         uint32_t x, y, lod;
         sstr >> x >> y >> lod;
@@ -115,7 +115,7 @@ vsg::ref_ptr<vsg::Object> TileReader::read_root(vsg::ref_ptr<const vsg::Options>
     }
 
     uint32_t estimatedNumOfTilesBelow = 0;
-    uint32_t maxNumTilesBelow = 40000;
+    uint32_t maxNumTilesBelow = 1024;
 
     uint32_t level = 0;
     for (uint32_t i = level; i < maxLevel; ++i)
@@ -227,7 +227,7 @@ vsg::ref_ptr<vsg::Object> TileReader::read_subtile(uint32_t x, uint32_t y, uint3
 
     if (group->children.size() != 4)
     {
-        std::cout << "Warning: could not load all 4 subtiles, loaded only " << group->children.size() << std::endl;
+        vsg::warn("Warning: could not load all 4 subtiles, loaded only ", group->children.size());
 
         return {};
     }
@@ -269,7 +269,7 @@ vsg::ref_ptr<vsg::StateGroup> TileReader::createRoot() const
     vsg::ref_ptr<vsg::ShaderStage> fragmentShader = vsg::ShaderStage::read(VK_SHADER_STAGE_FRAGMENT_BIT, "main", vsg::findFile("shaders/frag_PushConstants.spv", searchPaths));
     if (!vertexShader || !fragmentShader)
     {
-        std::cout << "Could not create shaders." << std::endl;
+        vsg::warn("Could not create shaders.");
         return {};
     }
 
@@ -347,7 +347,7 @@ vsg::ref_ptr<vsg::Node> TileReader::createECEFTile(const vsg::dbox& tile_extents
     float sCoordScale = 1.0f / float(numCols - 1);
     float tCoordScale = 1.0f / float(numRows - 1);
     float tCoordOrigin = 0.0;
-    if (textureData->getLayout().origin == vsg::TOP_LEFT)
+    if (textureData->properties.origin == vsg::TOP_LEFT)
     {
         tCoordScale = -tCoordScale;
         tCoordOrigin = 1.0f;
@@ -449,7 +449,7 @@ vsg::ref_ptr<vsg::Node> TileReader::createTextureQuad(const vsg::dbox& tile_exte
          {1.0f, 1.0f, 1.0f},
          {1.0f, 1.0f, 1.0f}}); // VK_FORMAT_R32G32B32_SFLOAT, VK_VERTEX_INPUT_RATE_VERTEX, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE
 
-    uint8_t origin = textureData->getLayout().origin; // in Vulkan the origin is by default top left.
+    uint8_t origin = textureData->properties.origin; // in Vulkan the origin is by default top left.
     float left = 0.0f;
     float right = 1.0f;
     float top = (origin == vsg::TOP_LEFT) ? 0.0f : 1.0f;
