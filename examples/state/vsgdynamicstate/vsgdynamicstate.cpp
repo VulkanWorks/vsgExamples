@@ -33,7 +33,6 @@ int main(int argc, char** argv)
     // set up defaults and read command line arguments to override them
     vsg::CommandLine arguments(&argc, argv);
 
-    // set up defaults and read command line arguments to override them
     auto options = vsg::Options::create();
     options->paths = vsg::getEnvPaths("VSG_FILE_PATH");
     options->sharedObjects = vsg::SharedObjects::create();
@@ -43,9 +42,16 @@ int main(int argc, char** argv)
     options->add(vsgXchange::all::create());
 #endif
 
+    // enable wireframe and line width setting.
+    auto deviceFeatures = vsg::DeviceFeatures::create();
+    deviceFeatures->get().fillModeNonSolid = VK_TRUE;
+    deviceFeatures->get().wideLines = VK_TRUE;
+
     auto windowTraits = vsg::WindowTraits::create();
     windowTraits->debugLayer = arguments.read({"--debug", "-d"});
     windowTraits->apiDumpLayer = arguments.read({"--api", "-a"});
+    windowTraits->deviceFeatures = deviceFeatures;
+
     arguments.read({"--window", "-w"}, windowTraits->width, windowTraits->height);
 
     vsg::ref_ptr<vsg::ShaderSet> shaderSet;
@@ -64,11 +70,6 @@ int main(int argc, char** argv)
     auto share = arguments.read("--share");
 
     if (!shaderSet) shaderSet = vsg::createPhongShaderSet(options);
-
-    // enable wireframe mode to visualize line width
-    auto rasterizationState = vsg::RasterizationState::create();
-    rasterizationState->polygonMode = VK_POLYGON_MODE_LINE;
-    shaderSet->defaultGraphicsPipelineStates.push_back(rasterizationState);
 
     if (arguments.errors()) return arguments.writeErrorMessages(std::cerr);
 
@@ -91,12 +92,26 @@ int main(int argc, char** argv)
 
     auto graphicsPipelineConfig = vsg::GraphicsPipelineConfigurator::create(shaderSet);
 
-    // instantiate dynamicstate and add the state
-    graphicsPipelineConfig->dynamicState = vsg::DynamicState::create();
-    graphicsPipelineConfig->dynamicState->dynamicStates.emplace_back(VK_DYNAMIC_STATE_LINE_WIDTH);
+    // enable wireframe mode to visualize line width of the mesh
+    struct SetPipelineStates : public vsg::Visitor
+    {
+        void apply(vsg::Object& object) override
+        {
+            object.traverse(*this);
+        }
 
-    // set up graphics pipeline
-    vsg::Descriptors descriptors;
+        void apply(vsg::RasterizationState& rs) override
+        {
+            rs.polygonMode = VK_POLYGON_MODE_LINE;
+        }
+    };
+
+    vsg::visit<SetPipelineStates>(graphicsPipelineConfig);
+
+    // instantiate dynamicstate and add the state
+    auto dynamicState = vsg::DynamicState::create();
+    dynamicState->dynamicStates.emplace_back(VK_DYNAMIC_STATE_LINE_WIDTH);
+    graphicsPipelineConfig->pipelineStates.push_back(dynamicState);
 
     // read texture image
     if (textureFile)
@@ -109,17 +124,15 @@ int main(int argc, char** argv)
         }
 
         // enable texturing
-        graphicsPipelineConfig->assignTexture(descriptors, "diffuseMap", textureData);
+        graphicsPipelineConfig->assignTexture("diffuseMap", textureData);
     }
 
-    // set up pass of material
+    // set up passing of material
     auto mat = vsg::PhongMaterialValue::create();
     mat->value().diffuse.set(1.0f, 1.0f, 1.0f, 1.0f);
     mat->value().specular.set(1.0f, 0.0f, 0.0f, 1.0f); // red specular highlight
 
-    graphicsPipelineConfig->assignUniform(descriptors, "material", mat);
-
-    if (sharedObjects) sharedObjects->share(descriptors);
+    graphicsPipelineConfig->assignDescriptor("material", mat);
 
     // set up vertex and index arrays
     auto vertices = vsg::vec3Array::create(
@@ -172,12 +185,13 @@ int main(int argc, char** argv)
 
     // setup geometry
     auto drawCommands = vsg::Commands::create();
-    drawCommands->addChild(vsg::BindVertexBuffers::create(graphicsPipelineConfig->baseAttributeBinding, vertexArrays));
-    drawCommands->addChild(vsg::BindIndexBuffer::create(indices));
-    drawCommands->addChild(vsg::DrawIndexed::create(12, 1, 0, 0, 0));
     // get the reference and bind it to ImGui slider
     auto setLineWidth = vsg::SetLineWidth::create(1.0f);
     drawCommands->addChild(setLineWidth);
+
+    drawCommands->addChild(vsg::BindVertexBuffers::create(graphicsPipelineConfig->baseAttributeBinding, vertexArrays));
+    drawCommands->addChild(vsg::BindIndexBuffer::create(indices));
+    drawCommands->addChild(vsg::DrawIndexed::create(12, 1, 0, 0, 0));
 
     if (sharedObjects)
     {
@@ -185,34 +199,16 @@ int main(int argc, char** argv)
         sharedObjects->share(drawCommands);
     }
 
-    // register the ViewDescriptorSetLayout.
-    vsg::ref_ptr<vsg::ViewDescriptorSetLayout> vdsl;
-    if (sharedObjects)
-        vdsl = sharedObjects->shared_default<vsg::ViewDescriptorSetLayout>();
-    else
-        vdsl = vsg::ViewDescriptorSetLayout::create();
-    graphicsPipelineConfig->additionalDescriptorSetLayout = vdsl;
-
-    // share the pipeline config and initilaize if it's unique
+    // share the pipeline config and initialize it if it's unique
     if (sharedObjects)
         sharedObjects->share(graphicsPipelineConfig, [](auto gpc) { gpc->init(); });
     else
         graphicsPipelineConfig->init();
 
-    auto descriptorSet = vsg::DescriptorSet::create(graphicsPipelineConfig->descriptorSetLayout, descriptors);
-    if (sharedObjects) sharedObjects->share(descriptorSet);
-
-    auto bindDescriptorSet = vsg::BindDescriptorSet::create(VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineConfig->layout, 0, descriptorSet);
-    if (sharedObjects) sharedObjects->share(bindDescriptorSet);
-
-    auto bindViewDescriptorSets = vsg::BindViewDescriptorSets::create(VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineConfig->layout, 1);
-    if (sharedObjects) sharedObjects->share(bindViewDescriptorSets);
-
-    // create StateGroup as the root of the scene/command graph to hold the GraphicsProgram, and binding of Descriptors to decorate the whole graph
+    // create StateGroup as the root of the scene/command graph to hold the GraphicsPipeline, and binding of Descriptors to decorate the whole graph
     auto stateGroup = vsg::StateGroup::create();
-    stateGroup->add(graphicsPipelineConfig->bindGraphicsPipeline);
-    stateGroup->add(bindDescriptorSet);
-    stateGroup->add(bindViewDescriptorSets);
+
+    graphicsPipelineConfig->copyTo(stateGroup, sharedObjects);
 
     // set up model transformation node
     auto transform = vsg::MatrixTransform::create();
@@ -262,7 +258,7 @@ int main(int argc, char** argv)
     auto window = vsg::Window::create(windowTraits);
     if (!window)
     {
-        std::cout << "Could not create windows." << std::endl;
+        std::cout << "Could not create window." << std::endl;
         return 1;
     }
 
@@ -312,7 +308,7 @@ int main(int argc, char** argv)
     // Add the ImGui event handler first to handle events early
     viewer->addEventHandler(vsgImGui::SendEventsToImGui::create());
 
-    // assign a CloseHandler to the Viewer to respond to pressing Escape or press the window close button
+    // assign a CloseHandler to the Viewer to respond to pressing Escape or the window close button
     viewer->addEventHandlers({vsg::CloseHandler::create(viewer)});
 
     viewer->addEventHandler(vsg::Trackball::create(camera));

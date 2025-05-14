@@ -1,8 +1,11 @@
+add_subdirectory(vsgannotation)
 add_subdirectory(vsggroups)
-add_subdirectory(vsglights)
 add_subdirectory(vsgtransform)
+add_subdirectory(vsgtextureprojection)
+add_subdirectory(vsglayers)
 
 if (vsgXchange_FOUND)
+    add_subdirectory(vsgcoordinateframe)
     add_subdirectory(vsgpagedlod)
     add_subdirectory(vsgtiledatabase)
 endif()

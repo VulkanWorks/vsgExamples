@@ -11,7 +11,7 @@
 
 struct Merge : public vsg::Inherit<vsg::Operation, Merge>
 {
-    Merge(const vsg::Path& in_path, vsg::observer_ptr<vsg::Viewer> in_viewer, vsg::ref_ptr<vsg::Group> in_attachmentPoint, vsg::ref_ptr<vsg::Node> in_node, const vsg::CompileResult& in_compileResult):
+    Merge(const vsg::Path& in_path, vsg::observer_ptr<vsg::Viewer> in_viewer, vsg::ref_ptr<vsg::Group> in_attachmentPoint, vsg::ref_ptr<vsg::Node> in_node, const vsg::CompileResult& in_compileResult) :
         path(in_path),
         viewer(in_viewer),
         attachmentPoint(in_attachmentPoint),
@@ -26,7 +26,7 @@ struct Merge : public vsg::Inherit<vsg::Operation, Merge>
 
     void run() override
     {
-        std::cout<<"Merge::run() path = "<<path<<", "<<attachmentPoint<<", "<<node<<std::endl;
+        std::cout << "Merge::run() path = " << path << ", " << attachmentPoint << ", " << node << std::endl;
 
         vsg::ref_ptr<vsg::Viewer> ref_viewer = viewer;
         if (ref_viewer)
@@ -80,7 +80,7 @@ struct LoadViewOperation : public vsg::Inherit<vsg::Operation, LoadViewOperation
 
             // set up the camera
             auto lookAt = vsg::LookAt::create(centre + vsg::dvec3(0.0, -radius * 3.5, 0.0),
-                                            centre, vsg::dvec3(0.0, 0.0, 1.0));
+                                              centre, vsg::dvec3(0.0, 0.0, 1.0));
 
             auto perspective = vsg::Perspective::create(30.0, static_cast<double>(width) / static_cast<double>(height),
                                                         nearFarRatio * radius, radius * 4.5);
@@ -89,23 +89,23 @@ struct LoadViewOperation : public vsg::Inherit<vsg::Operation, LoadViewOperation
 
             auto camera = vsg::Camera::create(perspective, lookAt, viewportState);
             auto view = vsg::View::create(camera, node);
+            view->addChild(vsg::createHeadlight());
 
             auto renderGraph = vsg::RenderGraph::create(ref_window, view);
-            renderGraph->setClearValues({{0.2f, 0.2f, 0.2f, 1.0f}});
+            renderGraph->setClearValues(vsg::sRGB_to_linear(0.2f, 0.2f, 0.2f, 1.0f));
 
             // need to add view to compileManager
             ref_viewer->compileManager->add(*ref_window, view);
 
-            auto result = ref_viewer->compileManager->compile(renderGraph, [&view](vsg::Context& context)
-            {
+            auto result = ref_viewer->compileManager->compile(renderGraph, [&view](vsg::Context& context) {
                 if (context.view == view.get())
                 {
-                    std::cout<<"    Enabling compile for view "<<view<<std::endl;
+                    std::cout << "    Enabling compile for view " << view << std::endl;
                     return true;
                 }
                 else
                 {
-                    std::cout<<"    Disabling compile for view "<<view<<std::endl;
+                    std::cout << "    Disabling compile for view " << view << std::endl;
                     return false;
                 }
             });
@@ -115,7 +115,6 @@ struct LoadViewOperation : public vsg::Inherit<vsg::Operation, LoadViewOperation
     }
 };
 
-
 int main(int argc, char** argv)
 {
     try
@@ -123,7 +122,7 @@ int main(int argc, char** argv)
         // set up defaults and read command line arguments to override them
         vsg::CommandLine arguments(&argc, argv);
 
-        // set up vsg::Options to pass in filepaths and ReaderWriter's and other IO related options to use when reading and writing files.
+        // set up vsg::Options to pass in filepaths, ReaderWriters and other IO related options to use when reading and writing files.
         auto options = vsg::Options::create();
         options->sharedObjects = vsg::SharedObjects::create();
         options->fileCache = vsg::getEnv("VSG_FILE_CACHE");
@@ -137,7 +136,7 @@ int main(int argc, char** argv)
         arguments.read(options);
 
         auto windowTraits = vsg::WindowTraits::create();
-        windowTraits->windowTitle = "vsgdynamicload";
+        windowTraits->windowTitle = "vsgdynamicviews";
         windowTraits->debugLayer = arguments.read({"--debug", "-d"});
         windowTraits->apiDumpLayer = arguments.read({"--api", "-a"});
         if (arguments.read({"--fullscreen", "--fs"})) windowTraits->fullscreen = true;
@@ -155,14 +154,19 @@ int main(int argc, char** argv)
 
         // create a Group to contain all the nodes
         auto vsg_scene = vsg::read_cast<vsg::Node>("models/teapot.vsgt", options);
+        if (!vsg_scene)
+        {
+            std::cout << "Unable to load file "
+                      << "models/teapot.vsgt" << std::endl;
+            return 1;
+        }
 
         vsg::ref_ptr<vsg::Window> window(vsg::Window::create(windowTraits));
         if (!window)
         {
-            std::cout << "Could not create windows." << std::endl;
+            std::cout << "Could not create window." << std::endl;
             return 1;
         }
-
 
         // create the viewer and assign window(s) to it
         auto viewer = vsg::Viewer::create();
@@ -174,8 +178,7 @@ int main(int argc, char** argv)
         vsg::dvec3 primary(2.0, 0.0, 0.0);
         vsg::dvec3 secondary(0.0, 2.0, 0.0);
 
-        // compute the bounds of the scene graph to help position camera
-        // compute the bounds of the scene graph to help position camera
+        // compute the bounds of the scene graph to help position the camera
         vsg::ComputeBounds computeBounds;
         vsg_scene->accept(computeBounds);
         vsg::dvec3 centre = (computeBounds.bounds.min + computeBounds.bounds.max) * 0.5;
@@ -201,7 +204,7 @@ int main(int argc, char** argv)
         auto viewportState = vsg::ViewportState::create(window->extent2D());
         auto camera = vsg::Camera::create(perspective, lookAt, viewportState);
 
-        // add close handler to respond the close window button and pressing escape
+        // add close handler to respond to the close window button and pressing escape
         viewer->addEventHandler(vsg::CloseHandler::create(viewer));
 
         viewer->addEventHandler(vsg::Trackball::create(camera));
@@ -217,13 +220,13 @@ int main(int argc, char** argv)
             resourceHints->descriptorPoolSizes.push_back(VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 256});
         }
 
-        // configure the viewers rendering backend, initialize and compile Vulkan objects, passing in ResourceHints to guide the resources allocated.
+        // configure the viewer's rendering backend, initialize and compile Vulkan objects, passing in ResourceHints to guide the resources allocated.
         viewer->compile(resourceHints);
 
         // create threads to load models and views in background
         auto loadThreads = vsg::OperationThreads::create(numThreads, viewer->status);
 
-        // assign the LoadViewOperation that will do the load in the background and once loaded and compiled merged then via Merge operation that is assigned to updateOperations and called from viewer.update()
+        // assign the LoadViewOperation that will do the load in the background and once loaded and compiled, merge via Merge operation that is assigned to updateOperations and called from viewer.update()
         vsg::observer_ptr<vsg::Viewer> observer_viewer(viewer);
         loadThreads->add(LoadViewOperation::create(observer_viewer, window, 50, 50, 512, 480, commandGraph, "models/openstreetmap.vsgt", options));
         loadThreads->add(LoadViewOperation::create(observer_viewer, window, 600, 50, 512, 480, commandGraph, "models/lz.vsgt", options));

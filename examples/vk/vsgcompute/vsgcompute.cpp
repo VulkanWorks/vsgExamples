@@ -11,7 +11,7 @@ int main(int argc, char** argv)
     auto debugLayer = arguments.read({"--debug", "-d"});
     auto apiDumpLayer = arguments.read({"--api", "-a"});
     auto workgroupSize = arguments.value(32, "-w");
-    auto outputFilename = arguments.value<std::string>("", "-o");
+    auto outputFilename = arguments.value<vsg::Path>("", "-o");
     auto outputAsFloat = arguments.read("-f");
     if (arguments.errors()) return arguments.writeErrorMessages(std::cerr);
 
@@ -45,7 +45,7 @@ int main(int argc, char** argv)
     auto [physicalDevice, computeQueueFamily] = instance->getPhysicalDeviceAndQueueFamily(VK_QUEUE_COMPUTE_BIT);
     if (!physicalDevice || computeQueueFamily < 0)
     {
-        std::cout << "No vkPhysicalDevice available that supports compute." << std::endl;
+        std::cout << "No VkPhysicalDevice available that supports compute." << std::endl;
         return 1;
     }
 
@@ -62,7 +62,7 @@ int main(int argc, char** argv)
     auto buffer = vsg::createBufferAndMemory(device, bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     auto bufferMemory = buffer->getDeviceMemory(device->deviceID);
 
-    // set up DescriptorSetLayout, DecriptorSet and BindDescriptorSets
+    // set up DescriptorSetLayout, DescriptorSet and BindDescriptorSets
     vsg::DescriptorSetLayoutBindings descriptorBindings{{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}};
     auto descriptorSetLayout = vsg::DescriptorSetLayout::create(descriptorBindings);
 
@@ -76,7 +76,7 @@ int main(int argc, char** argv)
     auto pipeline = vsg::ComputePipeline::create(pipelineLayout, computeStage);
     auto bindPipeline = vsg::BindComputePipeline::create(pipeline);
 
-    // assign to a CommandGraph that binds the Pipeline and DescritorSets and calls Dispatch
+    // assign to a CommandGraph that binds the Pipeline and DescriptorSets and calls Dispatch
     auto commandGraph = vsg::Commands::create();
     commandGraph->addChild(bindPipeline);
     commandGraph->addChild(bindDescriptorSet);
@@ -103,7 +103,7 @@ int main(int argc, char** argv)
     auto time = std::chrono::duration<float, std::chrono::milliseconds::period>(std::chrono::steady_clock::now() - startTime).count();
     std::cout << "Time to run commands " << time << "ms" << std::endl;
 
-    if (!outputFilename.empty())
+    if (outputFilename)
     {
         // Map the buffer memory and assign as a vec4Array2D that will automatically unmap itself on destruction.
         auto image = vsg::MappedData<vsg::vec4Array2D>::create(bufferMemory, 0, 0, vsg::Data::Properties{VK_FORMAT_R32G32B32A32_SFLOAT}, width, height); // deviceMemory, offset, flags an d dimensions
@@ -114,7 +114,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            // create a unsigned byte version of the image and then copy the texels across converting colours from float to unsigned byte.
+            // create an unsigned byte version of the image and then copy the texels across converting colours from float to unsigned byte.
             auto dest = vsg::ubvec4Array2D::create(width, height, vsg::Data::Properties{VK_FORMAT_R8G8B8A8_UNORM});
 
             using component_type = uint8_t;

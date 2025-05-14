@@ -12,7 +12,7 @@
 class VsgVisitor : public vsg::Visitor
 {
 public:
-    unsigned int numNodes = 0;
+    uint64_t numNodes = 0;
 
     using Visitor::apply;
 
@@ -49,7 +49,7 @@ public:
 class VsgConstVisitor : public vsg::ConstVisitor
 {
 public:
-    unsigned int numNodes = 0;
+    uint64_t numNodes = 0;
 
     using ConstVisitor::apply;
 
@@ -86,7 +86,7 @@ public:
 class ExperimentVisitor : public experimental::SharedPtrVisitor
 {
 public:
-    unsigned int numNodes = 0;
+    uint64_t numNodes = 0;
 
     using SharedPtrVisitor::apply;
 
@@ -105,7 +105,7 @@ public:
     }
 };
 
-vsg::ref_ptr<vsg::Node> createVsgQuadTree(unsigned int numLevels, unsigned int& numNodes, unsigned int& numBytes)
+vsg::ref_ptr<vsg::Node> createVsgQuadTree(uint64_t numLevels, uint64_t& numNodes, uint64_t& numBytes)
 {
     if (numLevels == 0)
     {
@@ -130,7 +130,7 @@ vsg::ref_ptr<vsg::Node> createVsgQuadTree(unsigned int numLevels, unsigned int& 
     return t;
 }
 
-vsg::ref_ptr<vsg::Node> createFixedQuadTree(unsigned int numLevels, unsigned int& numNodes, unsigned int& numBytes)
+vsg::ref_ptr<vsg::Node> createFixedQuadTree(uint64_t numLevels, uint64_t& numNodes, uint64_t& numBytes)
 {
     if (numLevels == 0)
     {
@@ -155,7 +155,7 @@ vsg::ref_ptr<vsg::Node> createFixedQuadTree(unsigned int numLevels, unsigned int
     return t;
 }
 
-std::shared_ptr<experimental::SharedPtrNode> createSharedPtrQuadTree(unsigned int numLevels, unsigned int& numNodes, unsigned int& numBytes)
+std::shared_ptr<experimental::SharedPtrNode> createSharedPtrQuadTree(uint64_t numLevels, uint64_t& numNodes, uint64_t& numBytes)
 {
     if (numLevels == 0)
     {
@@ -180,15 +180,87 @@ std::shared_ptr<experimental::SharedPtrNode> createSharedPtrQuadTree(unsigned in
     return t;
 }
 
+// consider tcmalloc? https://goog-perftools.sourceforge.net/doc/tcmalloc.html
+// consider Alloc https://www.codeproject.com/Articles/1084801/Replace-malloc-free-with-a-Fast-Fixed-Block-Memory
+class StdAllocator : public vsg::Allocator
+{
+public:
+    StdAllocator(std::unique_ptr<Allocator> in_nestedAllocator = {}) :
+        vsg::Allocator(std::move(in_nestedAllocator))
+    {
+    }
+
+    ~StdAllocator()
+    {
+    }
+
+    void report(std::ostream& out) const override
+    {
+        out << "StdAllocator::report() " << std::endl;
+    }
+
+    void* allocate(std::size_t size, vsg::AllocatorAffinity) override
+    {
+        return operator new(size); //, std::align_val_t{default_alignment});
+    }
+
+    bool deallocate(void* ptr, std::size_t size) override
+    {
+        if (nestedAllocator && nestedAllocator->deallocate(ptr, size)) return true;
+
+        operator delete(ptr); //, std::align_val_t{default_alignment});
+        return true;
+    }
+
+    size_t deleteEmptyMemoryBlocks() override { return 0; }
+    size_t totalAvailableSize() const override { return 0; }
+    size_t totalReservedSize() const override { return 0; }
+    size_t totalMemorySize() const override { return 0; }
+    void setBlockSize(vsg::AllocatorAffinity, size_t) {}
+};
+
+const size_t KB = 1024;
+const size_t MB = 1024 * KB;
+const size_t GB = 1024 * MB;
+
+struct Units
+{
+    Units(size_t v) :
+        value(v) {}
+
+    size_t value;
+};
+
+std::ostream& operator<<(std::ostream& out, const Units& size)
+{
+    if (size.value > GB)
+        out << static_cast<double>(size.value) / static_cast<double>(GB) << " gigabytes";
+    else if (size.value > MB)
+        out << static_cast<double>(size.value) / static_cast<double>(MB) << " megabytes";
+    else if (size.value > KB)
+        out << static_cast<double>(size.value) / static_cast<double>(KB) << " kilobytes";
+    else
+        out << size.value << " bytes";
+    return out;
+}
 int main(int argc, char** argv)
 {
     vsg::CommandLine arguments(&argc, argv);
+    if (arguments.read("--std")) vsg::Allocator::instance().reset(new StdAllocator(std::move(vsg::Allocator::instance())));
+
     auto numLevels = arguments.value(11u, {"-l", "--levels"});
     auto numTraversals = arguments.value(10u, {"-t", "--traversals"});
     auto type = arguments.value(std::string("vsg::Group"), "--type");
     auto quiet = arguments.read("-q");
-    auto inputFilename = arguments.value(std::string(""), "-i");
-    auto outputFilename = arguments.value(std::string(""), "-o");
+    auto inputFilename = arguments.value<vsg::Path>("", "-i");
+    auto outputFilename = arguments.value<vsg::Path>("", "-o");
+
+    size_t unit = arguments.value<size_t>(MB, "--unit");
+    if (int allocatorType; arguments.read("--allocator", allocatorType)) vsg::Allocator::instance()->allocatorType = vsg::AllocatorType(allocatorType);
+    if (size_t objectsBlockSize; arguments.read("--objects", objectsBlockSize)) vsg::Allocator::instance()->setBlockSize(vsg::ALLOCATOR_AFFINITY_OBJECTS, objectsBlockSize * unit);
+    if (size_t nodesBlockSize; arguments.read("--nodes", nodesBlockSize)) vsg::Allocator::instance()->setBlockSize(vsg::ALLOCATOR_AFFINITY_NODES, nodesBlockSize * unit);
+    if (size_t dataBlockSize; arguments.read("--data", dataBlockSize)) vsg::Allocator::instance()->setBlockSize(vsg::ALLOCATOR_AFFINITY_DATA, dataBlockSize * unit);
+
     vsg::ref_ptr<vsg::RecordTraversal> vsg_recordTraversal(arguments.read("-d") ? new vsg::RecordTraversal : nullptr);
     vsg::ref_ptr<VsgConstVisitor> vsg_ConstVisitor(arguments.read("-c") ? new VsgConstVisitor : nullptr);
     if (arguments.errors()) return arguments.writeErrorMessages(std::cerr);
@@ -199,10 +271,10 @@ int main(int argc, char** argv)
     vsg::ref_ptr<vsg::Node> vsg_root;
     std::shared_ptr<experimental::SharedPtrNode> shared_root;
 
-    unsigned int numNodes = 0;
-    unsigned int numBytes = 0;
+    uint64_t numNodes = 0;
+    uint64_t numBytes = 0;
 
-    if (!inputFilename.empty())
+    if (inputFilename)
     {
         vsg_root = vsg::read_cast<vsg::Node>(inputFilename);
 
@@ -227,14 +299,14 @@ int main(int argc, char** argv)
 
     clock::time_point after_construction = clock::now();
 
-    unsigned int numNodesVisited = 0;
+    uint64_t numNodesVisited = 0;
 
     if (vsg_root)
     {
         if (vsg_recordTraversal)
         {
             std::cout << "using RecordTraversal" << std::endl;
-            for (unsigned int i = 0; i < numTraversals; ++i)
+            for (uint64_t i = 0; i < numTraversals; ++i)
             {
                 vsg_root->accept(*vsg_recordTraversal);
                 //numNodesVisited += vsg_recordTraversal->numNodes;
@@ -245,7 +317,7 @@ int main(int argc, char** argv)
         else if (vsg_ConstVisitor)
         {
             std::cout << "using VsgConstVisitor" << std::endl;
-            for (unsigned int i = 0; i < numTraversals; ++i)
+            for (uint64_t i = 0; i < numTraversals; ++i)
             {
                 vsg_root->accept(*vsg_ConstVisitor);
                 numNodesVisited += vsg_ConstVisitor->numNodes;
@@ -256,7 +328,7 @@ int main(int argc, char** argv)
         {
             vsg::ref_ptr<VsgVisitor> vsg_visitor(new VsgVisitor);
             std::cout << "using VsgVisitor" << std::endl;
-            for (unsigned int i = 0; i < numTraversals; ++i)
+            for (uint64_t i = 0; i < numTraversals; ++i)
             {
                 vsg_root->accept(*vsg_visitor);
                 numNodesVisited += vsg_visitor->numNodes;
@@ -268,7 +340,7 @@ int main(int argc, char** argv)
     {
         ExperimentVisitor experimentVisitor;
 
-        for (unsigned int i = 0; i < numTraversals; ++i)
+        for (uint64_t i = 0; i < numTraversals; ++i)
         {
             shared_root->accept(experimentVisitor);
             numNodesVisited += experimentVisitor.numNodes;
@@ -278,7 +350,7 @@ int main(int argc, char** argv)
 
     clock::time_point after_traversal = clock::now();
 
-    if (!outputFilename.empty())
+    if (outputFilename)
     {
         vsg::write(vsg_root, outputFilename);
     }

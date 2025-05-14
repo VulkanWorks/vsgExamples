@@ -1,6 +1,9 @@
 #include <iostream>
 #include <vsg/all.h>
-#include <vsgXchange/all.h>
+
+#ifdef vsgXchange_FOUND
+#    include <vsgXchange/all.h>
+#endif
 
 char volume_vert[] = R"(
 #version 450
@@ -76,16 +79,16 @@ void main() {
     t0 = t0 * texgen;
     te = te * texgen;
 
-    const float min_iteratrions = 2.0;
-    const float max_iteratrions = 2048.0;
+    const float min_iterations = 2.0;
+    const float max_iterations = 2048.0;
 
     float TransparencyValue = 0.2;
     float AlphaFuncValue = 0.1;
     float SampleDensityValue = 0.005; // 0.5 / texture_sample_count
 
     float num_iterations = ceil(length((te-t0).xyz)/SampleDensityValue);
-    if (num_iterations<min_iteratrions) num_iterations = min_iteratrions;
-    else if (num_iterations>max_iteratrions) num_iterations = max_iteratrions;
+    if (num_iterations<min_iterations) num_iterations = min_iterations;
+    else if (num_iterations>max_iterations) num_iterations = max_iterations;
 
     vec3 deltaTexCoord=(te-t0).xyz/(num_iterations-1.0);
     vec3 texcoord = t0.xyz;
@@ -117,21 +120,21 @@ void main() {
 
 void updateBaseTexture3D(vsg::floatArray3D& image, float value)
 {
-    for (size_t d = 0; d < image.depth(); ++d)
+    for (uint32_t d = 0; d < image.depth(); ++d)
     {
         float d_ratio = static_cast<float>(d) / static_cast<float>(image.depth() - 1);
-        for (size_t r = 0; r < image.height(); ++r)
+        for (uint32_t r = 0; r < image.height(); ++r)
         {
             float r_ratio = static_cast<float>(r) / static_cast<float>(image.height() - 1);
-            for (size_t c = 0; c < image.width(); ++c)
+            for (uint32_t c = 0; c < image.width(); ++c)
             {
                 float c_ratio = static_cast<float>(c) / static_cast<float>(image.width() - 1);
 
-                vsg::vec3 delta((r_ratio - 0.5f), (c_ratio - 0.5f), (d_ratio - 0.5));
+                vsg::vec3 delta((r_ratio - 0.5f), (c_ratio - 0.5f), (d_ratio - 0.5f));
                 float angle = atan2(delta.x, delta.y);
                 float distance_from_center = sqrt(d_ratio * d_ratio + r_ratio * r_ratio);
 
-                float intensity = (sin(1.0 * angle + 30.0f * distance_from_center + 10.0 * value) + 1.0f) * 0.5f;
+                float intensity = (sin(1.0f * angle + 30.0f * distance_from_center + 10.0f * value) + 1.0f) * 0.5f;
                 image.set(c, r, d, 1.0f - intensity);
             }
         }
@@ -194,7 +197,11 @@ int main(int argc, char** argv)
 
     auto options = vsg::Options::create();
     options->paths = vsg::getEnvPaths("VSG_FILE_PATH");
+
+#ifdef vsgXchange_all
+    // add vsgXchange's support for reading and writing 3rd party file formats
     options->add(vsgXchange::all::create());
+#endif
 
     auto windowTraits = vsg::WindowTraits::create();
     windowTraits->debugLayer = true;
@@ -217,12 +224,11 @@ int main(int argc, char** argv)
         return {};
     }
 
-
     vsg::ref_ptr<vsg::Data> textureData;
     if (auto texturePath = arguments.value<vsg::Path>("", "-i"))
     {
         textureData = vsg::read_cast<vsg::Data>(texturePath, options);
-        std::cout<<"Reading "<<textureData<<" from "<<texturePath<<std::endl;
+        std::cout << "Reading " << textureData << " from " << texturePath << std::endl;
     }
 
     if (!textureData)
@@ -244,13 +250,13 @@ int main(int argc, char** argv)
 
     // set up graphics pipeline
     vsg::DescriptorSetLayoutBindings descriptorBindings{
-        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorTpe, descriptorCount, stageFlags, pImmutableSamplers}
+        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorType, descriptorCount, stageFlags, pImmutableSamplers}
     };
 
     auto descriptorSetLayout = vsg::DescriptorSetLayout::create(descriptorBindings);
 
     vsg::PushConstantRanges pushConstantRanges{
-        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection view, and model matrices, actual push constant calls automatically provided by the VSG's DispatchTraversal
+        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection, view, and model matrices, actual push constant calls automatically provided by the VSG's RecordTraversal
     };
 
     vsg::VertexInputState::Bindings vertexBindingsDescriptions{
@@ -260,7 +266,6 @@ int main(int argc, char** argv)
     vsg::VertexInputState::Attributes vertexAttributeDescriptions{
         VkVertexInputAttributeDescription{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, // vertex data
     };
-
 
     auto rasterizationState = vsg::RasterizationState::create();
     rasterizationState->cullMode = VK_CULL_MODE_FRONT_BIT;
@@ -287,7 +292,7 @@ int main(int argc, char** argv)
     auto descriptorSet = vsg::DescriptorSet::create(descriptorSetLayout, vsg::Descriptors{texture});
     auto bindDescriptorSet = vsg::BindDescriptorSet::create(VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline->layout, 0, descriptorSet);
 
-    // create StateGroup as the root of the scene/command graph to hold the GraphicsProgram, and binding of Descriptors to decorate the whole graph
+    // create StateGroup as the root of the scene/command graph to hold the GraphicsPipeline, and binding of Descriptors to decorate the whole graph
     auto scenegraph = vsg::StateGroup::create();
     scenegraph->add(bindGraphicsPipeline);
     scenegraph->add(bindDescriptorSet);
@@ -307,7 +312,7 @@ int main(int argc, char** argv)
     auto window = vsg::Window::create(windowTraits);
     if (!window)
     {
-        std::cout << "Could not create windows." << std::endl;
+        std::cout << "Could not create window." << std::endl;
         return 1;
     }
 
@@ -316,7 +321,7 @@ int main(int argc, char** argv)
     // camera related details
     auto viewport = vsg::ViewportState::create(0, 0, window->extent2D().width, window->extent2D().height);
     auto perspective = vsg::Perspective::create(60.0, static_cast<double>(window->extent2D().width) / static_cast<double>(window->extent2D().height), 0.1, 20.0);
-    auto lookAt = vsg::LookAt::create(vsg::dvec3(1.0, 1.0, 1.0)*2.0, vsg::dvec3(0.5, 0.5, 0.5), vsg::dvec3(0.0, 0.0, 1.0));
+    auto lookAt = vsg::LookAt::create(vsg::dvec3(1.0, 1.0, 1.0) * 2.0, vsg::dvec3(0.5, 0.5, 0.5), vsg::dvec3(0.0, 0.0, 1.0));
     auto camera = vsg::Camera::create(perspective, lookAt, viewport);
 
     auto commandGraph = vsg::createCommandGraphForView(window, camera, scenegraph);
@@ -325,7 +330,7 @@ int main(int argc, char** argv)
     // compile the Vulkan objects
     viewer->compile();
 
-    // assign a CloseHandler to the Viewer to respond to pressing Escape or press the window close button
+    // assign a CloseHandler to the Viewer to respond to pressing Escape or the window close button
     viewer->addEventHandler(vsg::CloseHandler::create(viewer));
     viewer->addEventHandler(vsg::Trackball::create(camera));
 

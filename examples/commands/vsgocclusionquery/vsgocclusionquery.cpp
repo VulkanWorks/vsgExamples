@@ -12,7 +12,7 @@ int main(int argc, char** argv)
     // set up defaults and read command line arguments to override them
     vsg::CommandLine arguments(&argc, argv);
 
-    // set up vsg::Options to pass in filepaths and ReaderWriter's and other IO related options to use when reading and writing files.
+    // set up vsg::Options to pass in filepaths, ReaderWriters and other IO related options to use when reading and writing files.
     auto options = vsg::Options::create();
     options->sharedObjects = vsg::SharedObjects::create();
     options->fileCache = vsg::getEnv("VSG_FILE_CACHE");
@@ -26,10 +26,9 @@ int main(int argc, char** argv)
     arguments.read(options);
 
     auto windowTraits = vsg::WindowTraits::create();
-    windowTraits->windowTitle = "vsgviewer";
+    windowTraits->windowTitle = "vsgocclusionquery";
     windowTraits->debugLayer = arguments.read({"--debug", "-d"});
     windowTraits->apiDumpLayer = arguments.read({"--api", "-a"});
-    if (int mt = 0; arguments.read({"--memory-tracking", "--mt"}, mt)) vsg::Allocator::instance()->setMemoryTracking(mt);
     if (arguments.read("--double-buffer")) windowTraits->swapchainPreferences.imageCount = 2;
     if (arguments.read("--triple-buffer")) windowTraits->swapchainPreferences.imageCount = 3; // default
     if (arguments.read("--IMMEDIATE")) windowTraits->swapchainPreferences.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
@@ -56,7 +55,7 @@ int main(int argc, char** argv)
     arguments.read("--display", windowTraits->display);
     arguments.read("--samples", windowTraits->samples);
     auto numFrames = arguments.value(-1, "-f");
-    auto pathFilename = arguments.value(std::string(), "-p");
+    auto pathFilename = arguments.value<vsg::Path>("", "-p");
     if (arguments.read("--rgb")) options->mapRGBtoRGBAHint = false;
 
     if (int log_level = 0; arguments.read("--log-level", log_level)) vsg::Logger::instance()->level = vsg::Logger::Level(log_level);
@@ -93,7 +92,7 @@ int main(int argc, char** argv)
     auto window = vsg::Window::create(windowTraits);
     if (!window)
     {
-        std::cout << "Could not create windows." << std::endl;
+        std::cout << "Could not create window." << std::endl;
         return 1;
     }
 
@@ -122,30 +121,21 @@ int main(int argc, char** argv)
 
     auto camera = vsg::Camera::create(perspective, lookAt, vsg::ViewportState::create(window->extent2D()));
 
-    // add close handler to respond the close window button and pressing escape
+    // add close handler to respond to the close window button and pressing escape
     viewer->addEventHandler(vsg::CloseHandler::create(viewer));
 
-    if (pathFilename.empty())
+    if (pathFilename)
     {
-        viewer->addEventHandler(vsg::Trackball::create(camera, ellipsoidModel));
+        auto cameraAnimation = vsg::CameraAnimationHandler::create(camera, pathFilename, options);
+        viewer->addEventHandler(cameraAnimation);
+        if (cameraAnimation->animation) cameraAnimation->play();
     }
-    else
-    {
-        auto animationPath = vsg::read_cast<vsg::AnimationPath>(pathFilename, options);
-        if (!animationPath)
-        {
-            std::cout<<"Warning: unable to read animation path : "<<pathFilename<<std::endl;
-            return 1;
-        }
 
-        auto animationPathHandler = vsg::AnimationPathHandler::create(camera, animationPath, viewer->start_point());
-        animationPathHandler->printFrameStatsToConsole = true;
-        viewer->addEventHandler(animationPathHandler);
-    }
+    viewer->addEventHandler(vsg::Trackball::create(camera, ellipsoidModel));
 
     auto commandGraph = vsg::CommandGraph::create(window);
 
-    // create the query pool to to collect occlusion query info
+    // create the query pool to collect occlusion query info
     auto query_pool = vsg::QueryPool::create();
     query_pool->queryType = VK_QUERY_TYPE_OCCLUSION;
     query_pool->queryCount = 1;
@@ -182,7 +172,7 @@ int main(int argc, char** argv)
         std::vector<uint64_t> results(1);
         if (query_pool->getResults(results) == VK_SUCCESS)
         {
-            std::cout<<"results[0] = "<<results[0]<<std::endl;
+            std::cout << "results[0] = " << results[0] << std::endl;
         }
     }
 

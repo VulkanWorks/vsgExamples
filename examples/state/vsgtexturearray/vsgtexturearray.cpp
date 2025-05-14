@@ -8,10 +8,10 @@
 
 void updateBaseTexture(vsg::ubvec4Array2D& image, float value)
 {
-    for (size_t r = 0; r < image.height(); ++r)
+    for (uint32_t r = 0; r < image.height(); ++r)
     {
         float r_ratio = static_cast<float>(r) / static_cast<float>(image.height() - 1);
-        for (size_t c = 0; c < image.width(); ++c)
+        for (uint32_t c = 0; c < image.width(); ++c)
         {
             float c_ratio = static_cast<float>(c) / static_cast<float>(image.width() - 1);
 
@@ -21,8 +21,8 @@ void updateBaseTexture(vsg::ubvec4Array2D& image, float value)
 
             float distance_from_center = vsg::length(delta);
 
-            float intensity = (sin(1.0 * angle + 30.0f * distance_from_center + 10.0 * value) + 1.0f) * 0.5f;
-            image.set(c, r, vsg::ubvec4(uint8_t(intensity * intensity * 255.0), uint8_t(intensity * 255.0), uint8_t(intensity * 255.0), 255));
+            float intensity = (sin(1.0f * angle + 30.0f * distance_from_center + 10.0f * value) + 1.0f) * 0.5f;
+            image.set(c, r, vsg::ubvec4(uint8_t(intensity * intensity * 255.0f), uint8_t(intensity * 255.0f), uint8_t(intensity * 255.0f), 255));
         }
     }
     image.dirty();
@@ -30,10 +30,10 @@ void updateBaseTexture(vsg::ubvec4Array2D& image, float value)
 
 void updateElevation(vsg::floatArray2D& heightField, float value)
 {
-    for (size_t r = 0; r < heightField.height(); ++r)
+    for (uint32_t r = 0; r < heightField.height(); ++r)
     {
         float r_ratio = static_cast<float>(r) / static_cast<float>(heightField.height() - 1);
-        for (size_t c = 0; c < heightField.width(); ++c)
+        for (uint32_t c = 0; c < heightField.width(); ++c)
         {
             float c_ratio = static_cast<float>(c) / static_cast<float>(heightField.width() - 1);
 
@@ -43,7 +43,7 @@ void updateElevation(vsg::floatArray2D& heightField, float value)
 
             float distance_from_center = vsg::length(delta);
 
-            float intensity = (sin(1.0 * angle + 10.0f * distance_from_center + 2.0 * value) + 1.0f) * 0.5f;
+            float intensity = (sin(1.0f * angle + 10.0f * distance_from_center + 2.0f * value) + 1.0f) * 0.5f;
             heightField.set(c, r, intensity);
         }
     }
@@ -204,7 +204,7 @@ int main(int argc, char** argv)
     for (uint32_t i = 0; i < numTiles; ++i)
     {
         auto textureData = vsg::ubvec4Array2D::create(256, 256);
-        textureData->properties.format = VK_FORMAT_R8G8B8A8_UNORM;
+        textureData->properties.format = VK_FORMAT_R8G8B8A8_SRGB;
         if (update) textureData->properties.dataVariance = vsg::DYNAMIC_DATA;
 
         updateBaseTexture(*textureData, 1.0f);
@@ -225,20 +225,20 @@ int main(int argc, char** argv)
 
     // set up graphics pipeline
     vsg::DescriptorSetLayoutBindings descriptorBindings{
-        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, numTiles, VK_SHADER_STAGE_VERTEX_BIT, nullptr},  // { binding, descriptorTpe, descriptorCount, stageFlags, pImmutableSamplers}
-        {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, numTiles, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorTpe, descriptorCount, stageFlags, pImmutableSamplers}
+        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, numTiles, VK_SHADER_STAGE_VERTEX_BIT, nullptr},  // { binding, descriptorType, descriptorCount, stageFlags, pImmutableSamplers}
+        {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, numTiles, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorType, descriptorCount, stageFlags, pImmutableSamplers}
     };
 
     auto descriptorSetLayout = vsg::DescriptorSetLayout::create(descriptorBindings);
 
     vsg::DescriptorSetLayoutBindings tileSettingsDescriptorBindings{
-        {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorTpe, descriptorCount, stageFlags, pImmutableSamplers}
+        {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorType, descriptorCount, stageFlags, pImmutableSamplers}
     };
 
     auto tileSettingsDescriptorSetLayout = vsg::DescriptorSetLayout::create(tileSettingsDescriptorBindings);
 
     vsg::PushConstantRanges pushConstantRanges{
-        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection view, and model matrices, actual push constant calls automatically provided by the VSG's DispatchTraversal
+        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection, view, and model matrices, actual push constant calls automatically provided by the VSG's RecordTraversal
     };
 
     vsg::VertexInputState::Bindings vertexBindingsDescriptions{
@@ -297,7 +297,7 @@ int main(int argc, char** argv)
     auto descriptorSet = vsg::DescriptorSet::create(descriptorSetLayout, vsg::Descriptors{heightFieldDescriptorImage, baseDescriptorImage});
     auto bindDescriptorSet = vsg::BindDescriptorSet::create(VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline->layout, 0, descriptorSet);
 
-    // create StateGroup as the root of the scene/command graph to hold the GraphicsProgram, and binding of Descriptors to decorate the whole graph
+    // create StateGroup as the root of the scene/command graph to hold the GraphicsPipeline, and binding of Descriptors to decorate the whole graph
     auto scenegraph = vsg::StateGroup::create();
     scenegraph->add(bindGraphicsPipeline);
     scenegraph->add(bindDescriptorSet);
@@ -318,8 +318,8 @@ int main(int argc, char** argv)
             auto uniformValue = vsg::uintValue::create(tileIndex);
             auto uniformBuffer = vsg::DescriptorBuffer::create(uniformValue, 0);
 
-            auto uniformDscriptorSet = vsg::DescriptorSet::create(tileSettingsDescriptorSetLayout, vsg::Descriptors{uniformBuffer});
-            auto uniformBindDescriptorSet = vsg::BindDescriptorSet::create(VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, uniformDscriptorSet);
+            auto uniformDescriptorSet = vsg::DescriptorSet::create(tileSettingsDescriptorSetLayout, vsg::Descriptors{uniformBuffer});
+            auto uniformBindDescriptorSet = vsg::BindDescriptorSet::create(VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, uniformDescriptorSet);
 
 #if 1
             // assign the tileIndex uniform directly to the transform group before the geometry
@@ -332,7 +332,7 @@ int main(int argc, char** argv)
             scenegraph->addChild(transform);
 #else
 
-            // use a StateGrpi to assign the tileIndex
+            // use a StateGroup to assign the tileIndex
             auto tileSettingsGroup = vsg::StateGroup::create();
             tileSettingsGroup->add(uniformBindDescriptorSet);
             tileSettingsGroup->addChild(transform);
@@ -353,7 +353,7 @@ int main(int argc, char** argv)
     auto window = vsg::Window::create(windowTraits);
     if (!window)
     {
-        std::cout << "Could not create windows." << std::endl;
+        std::cout << "Could not create window." << std::endl;
         return 1;
     }
 
@@ -382,7 +382,7 @@ int main(int argc, char** argv)
     // compile the Vulkan objects
     viewer->compile();
 
-    // texture has been filled in so it's now safe to get the ImageData that holds the handles to the texture's
+    // texture has been filled in so it's now safe to get the ImageData that holds the handles to the textures
 
     // create a context to manage the DeviceMemoryPool for us when we need to copy data to a staging buffer
     vsg::Context context(window->getOrCreateDevice());

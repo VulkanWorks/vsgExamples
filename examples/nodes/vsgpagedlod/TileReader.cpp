@@ -78,6 +78,7 @@ vsg::ref_ptr<vsg::Object> TileReader::read(const vsg::Path& filename, vsg::ref_p
 vsg::ref_ptr<vsg::Object> TileReader::read_root(vsg::ref_ptr<const vsg::Options> options) const
 {
     auto group = createRoot();
+    if (!group) return {};
 
     uint32_t lod = 0;
     for (uint32_t y = 0; y < noY; ++y)
@@ -120,7 +121,7 @@ vsg::ref_ptr<vsg::Object> TileReader::read_root(vsg::ref_ptr<const vsg::Options>
     uint32_t level = 0;
     for (uint32_t i = level; i < maxLevel; ++i)
     {
-        estimatedNumOfTilesBelow += std::pow(4, i - level);
+        estimatedNumOfTilesBelow += static_cast<uint32_t>(std::pow(4, i - level));
     }
 
     uint32_t tileMultiplier = std::min(estimatedNumOfTilesBelow, maxNumTilesBelow) + 1;
@@ -193,7 +194,7 @@ vsg::ref_ptr<vsg::Object> TileReader::read_subtile(uint32_t x, uint32_t y, uint3
                     {
                         auto plod = vsg::PagedLOD::create();
                         plod->bound = bound;
-                        plod->children[0] = vsg::PagedLOD::Child{lodTransitionScreenHeightRatio, {}}; // external child visible when it's bound occupies more than 1/4 of the height of the window
+                        plod->children[0] = vsg::PagedLOD::Child{lodTransitionScreenHeightRatio, {}}; // external child visible when its bound occupies more than 1/4 of the height of the window
                         plod->children[1] = vsg::PagedLOD::Child{0.0, tile};                          // visible always
                         plod->filename = vsg::make_string(tileID.local_x, " ", tileID.local_y, " ", local_lod, ".tile");
                         plod->options = vsg::Options::create_if(options, *options);
@@ -239,19 +240,19 @@ void TileReader::init()
 {
     // set up graphics pipeline
     vsg::DescriptorSetLayoutBindings descriptorBindings{
-        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorTpe, descriptorCount, stageFlags, pImmutableSamplers}
+        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorType, descriptorCount, stageFlags, pImmutableSamplers}
     };
 
     descriptorSetLayout = vsg::DescriptorSetLayout::create(descriptorBindings);
 
     vsg::PushConstantRanges pushConstantRanges{
-        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection view, and model matrices, actual push constant calls autoaatically provided by the VSG's DispatchTraversal
+        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection, view, and model matrices, actual push constant calls automatically provided by the VSG's RecordTraversal
     };
 
     pipelineLayout = vsg::PipelineLayout::create(vsg::DescriptorSetLayouts{descriptorSetLayout}, pushConstantRanges);
 
     sampler = vsg::Sampler::create();
-    sampler->maxLod = mipmapLevelsHint;
+    sampler->maxLod = static_cast<float>(mipmapLevelsHint);
     sampler->addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler->addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler->addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -269,7 +270,15 @@ vsg::ref_ptr<vsg::StateGroup> TileReader::createRoot() const
     vsg::ref_ptr<vsg::ShaderStage> fragmentShader = vsg::ShaderStage::read(VK_SHADER_STAGE_FRAGMENT_BIT, "main", vsg::findFile("shaders/frag_PushConstants.spv", searchPaths));
     if (!vertexShader || !fragmentShader)
     {
-        vsg::warn("Could not create shaders.");
+        vsg::warn("Could not find shaders. Please set the VSG_FILE_PATH env var to the path to your vsgExamples/data.");
+        if (!searchPaths.empty())
+        {
+            vsg::info("VSG_FILE_PATH set, but does not contains vert_PushConstants.spv & frag_PushConstants.spv shaders. Paths set:");
+            for (auto path : searchPaths)
+            {
+                vsg::info("    ", path);
+            }
+        }
         return {};
     }
 
@@ -427,15 +436,10 @@ vsg::ref_ptr<vsg::Node> TileReader::createTextureQuad(const vsg::dbox& tile_exte
     scenegraph->addChild(transform);
 
     // set up vertex and index arrays
-    float min_x = tile_extents.min.x;
-    float min_y = tile_extents.min.y;
-#if 1
-    float max_x = tile_extents.max.x;
-    float max_y = tile_extents.max.y;
-#else
-    float max_x = tile_extents.min.x * 0.05 + tile_extents.max.x * 0.95;
-    float max_y = tile_extents.min.y * 0.05 + tile_extents.max.y * 0.95;
-#endif
+    float min_x = static_cast<float>(tile_extents.min.x);
+    float min_y = static_cast<float>(tile_extents.min.y);
+    float max_x = static_cast<float>(tile_extents.max.x);
+    float max_y = static_cast<float>(tile_extents.max.y);
 
     auto vertices = vsg::vec3Array::create(
         {{min_x, 0.0f, min_y},

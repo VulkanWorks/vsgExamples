@@ -12,7 +12,7 @@ vsg::ref_ptr<vsg::Node> createScene(const vsg::Path& filename, vsg::ref_ptr<vsg:
 {
     if (filename)
     {
-        std::cout<<"createScene("<<filename<<", "<<options<<")"<<std::endl;
+        std::cout << "createScene(" << filename << ", " << options << ")" << std::endl;
         return vsg::read_cast<vsg::Node>(filename, options);
     }
 
@@ -36,14 +36,14 @@ vsg::ref_ptr<vsg::Node> createScene(const vsg::Path& filename, vsg::ref_ptr<vsg:
 
     // set up graphics pipeline
     vsg::DescriptorSetLayoutBindings descriptorBindings{
-        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}, // { binding, descriptorTpe, descriptorCount, stageFlags, pImmutableSamplers}
-        {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr}            // { binding, descriptorTpe, descriptorCount, stageFlags, pImmutableSamplers}
+        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}, // { binding, descriptorType, descriptorCount, stageFlags, pImmutableSamplers}
+        {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr}            // { binding, descriptorType, descriptorCount, stageFlags, pImmutableSamplers}
     };
 
     auto descriptorSetLayout = vsg::DescriptorSetLayout::create(descriptorBindings);
 
     vsg::PushConstantRanges pushConstantRanges{
-        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection view, and model matrices, actual push constant calls automatically provided by the VSG's DispatchTraversal
+        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection, view and model matrices, actual push constant calls automatically provided by the VSG's RecordTraversal
     };
 
     vsg::VertexInputState::Bindings vertexBindingsDescriptions{
@@ -79,7 +79,7 @@ vsg::ref_ptr<vsg::Node> createScene(const vsg::Path& filename, vsg::ref_ptr<vsg:
     auto descriptorSet = vsg::DescriptorSet::create(descriptorSetLayout, vsg::Descriptors{texture, uniform});
     auto bindDescriptorSets = vsg::BindDescriptorSets::create(VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline->layout, 0, vsg::DescriptorSets{descriptorSet});
 
-    // create StateGroup as the root of the scene/command graph to hold the GraphicsProgram, and binding of Descriptors to decorate the whole graph
+    // create StateGroup as the root of the scene/command graph to hold the GraphicsPipeline, and binding of Descriptors to decorate the whole graph
     auto scenegraph = vsg::StateGroup::create();
     scenegraph->add(bindGraphicsPipeline);
     scenegraph->add(bindDescriptorSets);
@@ -143,14 +143,13 @@ vsg::ref_ptr<vsg::Node> createScene(const vsg::Path& filename, vsg::ref_ptr<vsg:
 
 int main(int argc, char** argv)
 {
-    // set up defaults and read command line arguments to override them
     auto windowTraits = vsg::WindowTraits::create();
     windowTraits->windowTitle = "vsgmultigpu";
 
     // set up defaults and read command line arguments to override them
     vsg::CommandLine arguments(&argc, argv);
 
-    // set up vsg::Options to pass in filepaths and ReaderWriter's and other IO related options to use when reading and writing files.
+    // set up vsg::Options to pass in filepaths, ReaderWriters and other IO related options to use when reading and writing files.
     auto options = vsg::Options::create();
     options->fileCache = vsg::getEnv("VSG_FILE_CACHE");
     options->paths = vsg::getEnvPaths("VSG_FILE_PATH");
@@ -185,7 +184,7 @@ int main(int argc, char** argv)
     if (arguments.read("--or")) windowTraits->overrideRedirect = true;
     arguments.read("--display", windowTraits->display);
     auto numFrames = arguments.value(-1, "-f");
-    auto pathFilename = arguments.value(std::string(), "-p");
+    auto pathFilename = arguments.value<vsg::Path>("", "-p");
     auto horizonMountainHeight = arguments.value(-1.0, "--hmh");
     auto powerWall = arguments.read({"--power-wall", "--pw"});
     auto sharedScene = !arguments.read({"--no-shared"});
@@ -199,7 +198,7 @@ int main(int argc, char** argv)
         screensToUse.push_back(screen);
     }
 
-    // if now screens are assign use screen 0
+    // if no screens are assigned use screen 0
     if (screensToUse.empty()) screensToUse.push_back(0);
 
     if (screensToUse.size() > vsg::Device::maxNumDevices())
@@ -282,7 +281,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            // assume monitor are rotate around the viewer
+            // assume monitors are rotated around the viewer
             double fovY = 30.0;
             double fovX = atan(tan(vsg::radians(fovY) * 0.5) * aspectRatio) * 2.0;
             double angle = fovX * (double(i) - double(numScreens - 1) / 2.0);
@@ -323,45 +322,43 @@ int main(int argc, char** argv)
     }
     else if (affinity)
     {
+        std::cout << "vsg::setAffinity(";
+        for (auto cpu_num : affinity.cpus)
+        {
+            std::cout << " " << cpu_num;
+        }
+        std::cout << " )" << std::endl;
+
         vsg::setAffinity(affinity);
     }
 
-
-    // add close handler to respond the close window button and pressing escape
+    // add close handler to respond to the close window button and pressing escape
     viewer->addEventHandler(vsg::CloseHandler::create(viewer));
 
-    if (pathFilename.empty())
+    if (pathFilename)
     {
-        auto trackball = vsg::Trackball::create(master_camera);
-
-        int32_t x = 0;
-        int32_t y = 0;
-        uint32_t width = 0;
-        uint32_t height = 0;
-
-        for(auto& window : viewer->windows())
-        {
-            trackball->addWindow(window, vsg::ivec2(width, 0));
-            width += window->extent2D().width;
-            if (window->extent2D().height > height) height = window->extent2D().height;
-        }
-
-        master_camera->viewportState = vsg::ViewportState::create(x, y, width, height);
-
-        viewer->addEventHandler(trackball);
+        auto cameraAnimation = vsg::CameraAnimationHandler::create(master_camera, pathFilename, options);
+        viewer->addEventHandler(cameraAnimation);
+        if (cameraAnimation->animation) cameraAnimation->play();
     }
-    else
+
+    auto trackball = vsg::Trackball::create(master_camera);
+
+    int32_t x = 0;
+    int32_t y = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+
+    for (auto& window : viewer->windows())
     {
-        auto animationPath = vsg::read_cast<vsg::AnimationPath>(pathFilename, options);
-        if (!animationPath)
-        {
-            std::cout<<"Warning: unable to read animation path : "<<pathFilename<<std::endl;
-            return 1;
-        }
-        auto aph = vsg::AnimationPathHandler::create(master_camera, animationPath, viewer->start_point());
-        aph->printFrameStatsToConsole = true;
-        viewer->addEventHandler(aph);
+        trackball->addWindow(window, vsg::ivec2(width, 0));
+        width += window->extent2D().width;
+        if (window->extent2D().height > height) height = window->extent2D().height;
     }
+
+    master_camera->viewportState = vsg::ViewportState::create(x, y, width, height);
+
+    viewer->addEventHandler(trackball);
 
     viewer->compile();
 

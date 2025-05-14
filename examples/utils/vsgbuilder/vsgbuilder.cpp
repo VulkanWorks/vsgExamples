@@ -8,7 +8,6 @@
 
 int main(int argc, char** argv)
 {
-    // set up defaults and read command line arguments to override them
     auto options = vsg::Options::create();
     options->paths = vsg::getEnvPaths("VSG_FILE_PATH");
     options->sharedObjects = vsg::SharedObjects::create();
@@ -28,6 +27,7 @@ int main(int argc, char** argv)
     geomInfo.dx.set(1.0f, 0.0f, 0.0f);
     geomInfo.dy.set(0.0f, 1.0f, 0.0f);
     geomInfo.dz.set(0.0f, 0.0f, 1.0f);
+    geomInfo.cullNode = arguments.read("--cull");
 
     vsg::StateInfo stateInfo;
 
@@ -48,7 +48,7 @@ int main(int argc, char** argv)
 
     if (arguments.read("--shared")) options->sharedObjects = vsg::SharedObjects::create();
 
-    auto outputFilename = arguments.value<std::string>("", "-o");
+    auto outputFilename = arguments.value<vsg::Path>("", "-o");
 
     bool floatColors = !arguments.read("--ubvec4-colors");
     stateInfo.wireframe = arguments.read("--wireframe");
@@ -62,7 +62,7 @@ int main(int argc, char** argv)
     if (stateInfo.lighting && (hasDiffuseColor || hasSpecularColor))
     {
         builder->shaderSet = vsg::createPhongShaderSet(options);
-        if (auto& materialBinding = builder->shaderSet->getUniformBinding("material"))
+        if (auto& materialBinding = builder->shaderSet->getDescriptorBinding("material"))
         {
             auto mat = vsg::PhongMaterialValue::create();
             if (hasSpecularColor)
@@ -93,6 +93,7 @@ int main(int argc, char** argv)
     bool sphere = arguments.read("--sphere");
     bool heightfield = arguments.read("--hf");
     bool billboard = arguments.read("--billboard");
+    bool inherit = arguments.read("--inherit");
 
     if (!(box || sphere || cone || capsule || quad || cylinder || disk || heightfield))
     {
@@ -144,14 +145,14 @@ int main(int argc, char** argv)
                 stateInfo.billboard = true;
 
                 float w = std::pow(float(numVertices), 0.33f) * 2.0f * vsg::length(geomInfo.dx);
-                float scaleDistance = w*3.0;
+                float scaleDistance = w * 3.0f;
                 auto positions = vsg::vec4Array::create(numVertices);
                 geomInfo.positions = positions;
                 for (auto& v : *(positions))
                 {
                     v.set(w * (float(std::rand()) / float(RAND_MAX) - 0.5f),
-                        w * (float(std::rand()) / float(RAND_MAX) - 0.5f),
-                        w * (float(std::rand()) / float(RAND_MAX) - 0.5f), scaleDistance);
+                          w * (float(std::rand()) / float(RAND_MAX) - 0.5f),
+                          w * (float(std::rand()) / float(RAND_MAX) - 0.5f), scaleDistance);
                 }
 
                 radius += (0.5 * sqrt(3.0) * w);
@@ -166,8 +167,8 @@ int main(int argc, char** argv)
                 for (auto& v : *(positions))
                 {
                     v.set(w * (float(std::rand()) / float(RAND_MAX) - 0.5f),
-                        w * (float(std::rand()) / float(RAND_MAX) - 0.5f),
-                        w * (float(std::rand()) / float(RAND_MAX) - 0.5f));
+                          w * (float(std::rand()) / float(RAND_MAX) - 0.5f),
+                          w * (float(std::rand()) / float(RAND_MAX) - 0.5f));
                 }
 
                 radius += (0.5 * sqrt(3.0) * w);
@@ -177,6 +178,7 @@ int main(int argc, char** argv)
             {
                 if (floatColors)
                 {
+                    stateInfo.instance_colors_vec4 = true;
                     auto colors = vsg::vec4Array::create(numVertices);
                     geomInfo.colors = colors;
                     for (auto& c : *(colors))
@@ -186,6 +188,7 @@ int main(int argc, char** argv)
                 }
                 else
                 {
+                    stateInfo.instance_colors_vec4 = false;
                     auto colors = vsg::ubvec4Array::create(numVertices);
                     geomInfo.colors = colors;
                     for (auto& c : *(colors))
@@ -198,9 +201,19 @@ int main(int argc, char** argv)
 
         if (box)
         {
-            scene->addChild(builder->createBox(geomInfo, stateInfo));
+            auto node = builder->createBox(geomInfo, stateInfo);
             bound.add(geomInfo.position);
             geomInfo.position += geomInfo.dx * 1.5f;
+
+            if (auto sg = node.cast<vsg::StateGroup>(); sg && inherit)
+            {
+                options->inheritedState = sg->stateCommands;
+                scene = sg;
+            }
+            else
+            {
+                scene->addChild(node);
+            }
         }
 
         if (sphere)
@@ -257,7 +270,7 @@ int main(int argc, char** argv)
     }
 
     // write out scene if required
-    if (!outputFilename.empty())
+    if (outputFilename)
     {
         vsg::write(scene, outputFilename, options);
         return 0;
@@ -269,7 +282,7 @@ int main(int argc, char** argv)
     auto window = vsg::Window::create(windowTraits);
     if (!window)
     {
-        std::cout << "Could not create windows." << std::endl;
+        std::cout << "Could not create window." << std::endl;
         return 1;
     }
 
@@ -277,7 +290,7 @@ int main(int argc, char** argv)
 
     vsg::ref_ptr<vsg::LookAt> lookAt;
 
-    // compute the bounds of the scene graph to help position camera
+    // compute the bounds of the scene graph to help position the camera
     //vsg::ComputeBounds computeBounds;
     //scene->accept(computeBounds);
     //vsg::dvec3 centre = (computeBounds.bounds.min + computeBounds.bounds.max) * 0.5;
@@ -294,7 +307,7 @@ int main(int argc, char** argv)
     // set up the compilation support in builder to allow us to interactively create and compile subgraphs from within the IntersectionHandler
     // builder->setup(window, camera->viewportState);
 
-    // add close handler to respond the close window button and pressing escape
+    // add close handler to respond to the close window button and pressing escape
     viewer->addEventHandler(vsg::CloseHandler::create(viewer));
 
     viewer->addEventHandler(vsg::Trackball::create(camera));

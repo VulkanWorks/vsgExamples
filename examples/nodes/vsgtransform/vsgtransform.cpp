@@ -22,7 +22,6 @@ int main(int argc, char** argv)
     auto windowTraits = vsg::WindowTraits::create();
     windowTraits->windowTitle = "vsgtransform";
 
-
     // set up defaults and read command line arguments to override them
     vsg::CommandLine arguments(&argc, argv);
     windowTraits->debugLayer = arguments.read({"--debug", "-d"});
@@ -38,11 +37,11 @@ int main(int argc, char** argv)
 
     // bool useStagingBuffer = arguments.read({"--staging-buffer", "-s"});
 
-    auto outputFilename = arguments.value<std::string>("", "-o");
+    auto outputFilename = arguments.value<vsg::Path>("", "-o");
 
-    if (argc<1)
+    if (argc <= 1)
     {
-        std::cout<<"Please specify model to load on command line."<<std::endl;
+        std::cout << "Please specify model to load on command line." << std::endl;
         return 0;
     }
 
@@ -50,7 +49,7 @@ int main(int argc, char** argv)
     auto model = vsg::read_cast<vsg::Node>(filename, options);
     if (!model)
     {
-        std::cout<<"Faled to load "<<filename<<std::endl;
+        std::cout << "Failed to load " << filename << std::endl;
         return 1;
     }
 
@@ -64,7 +63,7 @@ int main(int argc, char** argv)
     if (!just_scale)
     {
         auto tm_1 = vsg::MatrixTransform::create();
-        tm_1->matrix = vsg::translate(-radius*(0.75+scale*0.5), 0.0, 0.0);
+        tm_1->matrix = vsg::translate(-radius * (0.75 + scale * 0.5), 0.0, 0.0);
         tm_1->addChild(model);
         scene->addChild(tm_1);
     }
@@ -77,18 +76,17 @@ int main(int argc, char** argv)
     if (!just_scale)
     {
         auto tm_3 = vsg::MatrixTransform::create();
-        tm_3->matrix = vsg::translate(centre + vsg::dvec3(radius*(0.75+scale*0.5), 0.0, 0.0)) * vsg::rotate(vsg::radians(90.0), 1.0, 0.0, 0.0) * vsg::translate(-centre);
+        tm_3->matrix = vsg::translate(centre + vsg::dvec3(radius * (0.75 + scale * 0.5), 0.0, 0.0)) * vsg::rotate(vsg::radians(90.0), 1.0, 0.0, 0.0) * vsg::translate(-centre);
         tm_3->addChild(model);
         scene->addChild(tm_3);
     }
 
     // write out scene if required
-    if (!outputFilename.empty())
+    if (outputFilename)
     {
         vsg::write(scene, outputFilename, options);
         return 0;
     }
-
 
     // create the viewer and assign window(s) to it
     auto viewer = vsg::Viewer::create();
@@ -96,7 +94,7 @@ int main(int argc, char** argv)
     auto window = vsg::Window::create(windowTraits);
     if (!window)
     {
-        std::cout << "Could not create windows." << std::endl;
+        std::cout << "Could not create window." << std::endl;
         return 1;
     }
 
@@ -122,7 +120,7 @@ int main(int argc, char** argv)
     view->camera = camera;
     view->addChild(scene);
 
-    // add close handler to respond the close window button and pressing escape
+    // add close handler to respond to the close window button and pressing escape
     viewer->addEventHandler(vsg::CloseHandler::create(viewer));
     viewer->addEventHandler(vsg::Trackball::create(camera));
 

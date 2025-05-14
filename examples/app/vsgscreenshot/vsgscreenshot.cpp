@@ -20,7 +20,7 @@ public:
     vsg::Path depthFilename;
     vsg::ref_ptr<vsg::Options> options;
 
-    ScreenshotHandler(vsg::ref_ptr<vsg::Event> in_event, const vsg::Path& in_colorFilename, const vsg::Path& in_depthFilename, vsg::ref_ptr<vsg::Options> in_options = {}):
+    ScreenshotHandler(vsg::ref_ptr<vsg::Event> in_event, const vsg::Path& in_colorFilename, const vsg::Path& in_depthFilename, vsg::ref_ptr<vsg::Options> in_options = {}) :
         event(in_event),
         colorFilename(in_colorFilename),
         depthFilename(in_depthFilename),
@@ -100,13 +100,13 @@ public:
         VkFormat targetImageFormat = sourceImageFormat;
 
         //
-        // 1) Check to see of Blit is supported.
+        // 1) Check to see if Blit is supported.
         //
         VkFormatProperties srcFormatProperties;
         vkGetPhysicalDeviceFormatProperties(*(physicalDevice), sourceImageFormat, &srcFormatProperties);
 
         VkFormatProperties destFormatProperties;
-        vkGetPhysicalDeviceFormatProperties(*(physicalDevice), VK_FORMAT_R8G8B8A8_UNORM, &destFormatProperties);
+        vkGetPhysicalDeviceFormatProperties(*(physicalDevice), VK_FORMAT_R8G8B8A8_SRGB, &destFormatProperties);
 
         bool supportsBlit = ((srcFormatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) != 0) &&
                             ((destFormatProperties.linearTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT) != 0);
@@ -114,7 +114,7 @@ public:
         if (supportsBlit)
         {
             // we can automatically convert the image format when blit, so take advantage of it to ensure RGBA
-            targetImageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+            targetImageFormat = VK_FORMAT_R8G8B8A8_SRGB;
         }
 
         vsg::info("supportsBlit = ", supportsBlit);
@@ -189,7 +189,7 @@ public:
 
         if (supportsBlit)
         {
-            // 3.c.1) if blit using VkCmdBliImage
+            // 3.c.1) if blit using vkCmdBlitImage
             VkImageBlit region{};
             region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             region.srcSubresource.layerCount = 1;
@@ -212,7 +212,7 @@ public:
         }
         else
         {
-            // 3.c.2) else use VkVmdCopyImage
+            // 3.c.2) else use vkCmdCopyImage
 
             VkImageCopy region{};
             region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -233,7 +233,7 @@ public:
             commands->addChild(copyImage);
         }
 
-        // 3.d) transition destinate image from transfer destination layout to general layout to enable mapping to image DeviceMemory
+        // 3.d) transition destination image from transfer destination layout to general layout to enable mapping to image DeviceMemory
         auto transitionDestinationImageToMemoryReadBarrier = vsg::ImageMemoryBarrier::create(
             VK_ACCESS_TRANSFER_WRITE_BIT,                                  // srcAccessMask
             VK_ACCESS_MEMORY_READ_BIT,                                     // dstAccessMask
@@ -293,21 +293,21 @@ public:
         {
             // Map the buffer memory and assign as a ubyteArray that will automatically unmap itself on destruction.
             // A ubyteArray is used as the graphics buffer memory is not contiguous like vsg::Array2D, so map to a flat buffer first then copy to Array2D.
-            auto mappedData = vsg::MappedData<vsg::ubyteArray>::create(deviceMemory, subResourceLayout.offset, 0, vsg::Data::Properties{targetImageFormat}, subResourceLayout.rowPitch*height);
+            auto mappedData = vsg::MappedData<vsg::ubyteArray>::create(deviceMemory, subResourceLayout.offset, 0, vsg::Data::Properties{targetImageFormat}, subResourceLayout.rowPitch * height);
             imageData = vsg::ubvec4Array2D::create(width, height, vsg::Data::Properties{targetImageFormat});
             for (uint32_t row = 0; row < height; ++row)
             {
-                std::memcpy(imageData->dataPointer(row*width), mappedData->dataPointer(row * subResourceLayout.rowPitch), destRowWidth);
+                std::memcpy(imageData->dataPointer(row * width), mappedData->dataPointer(row * subResourceLayout.rowPitch), destRowWidth);
             }
         }
 
         if (vsg::write(imageData, colorFilename, options))
         {
-            std::cout<<"Written color buffer to "<<colorFilename<<std::endl;
+            std::cout << "Written color buffer to " << colorFilename << std::endl;
         }
         else
         {
-            std::cout<<"Failed to written color buffer to "<<colorFilename<<std::endl;
+            std::cout << "Failed to write color buffer to " << colorFilename << std::endl;
         }
     }
 
@@ -470,7 +470,7 @@ public:
 
             if (vsg::write(imageData, depthFilename, options))
             {
-                std::cout<<"Written depth buffer to "<<depthFilename<<std::endl;
+                std::cout << "Written depth buffer to " << depthFilename << std::endl;
             }
         }
         else
@@ -479,7 +479,7 @@ public:
 
             if (vsg::write(imageData, depthFilename))
             {
-                std::cout<<"Written depth buffer to "<<depthFilename<<std::endl;
+                std::cout << "Written depth buffer to " << depthFilename << std::endl;
             }
         }
     }
@@ -527,7 +527,7 @@ int main(int argc, char** argv)
     if (arguments.read("--float")) windowTraits->depthFormat = VK_FORMAT_D32_SFLOAT;
     auto numFrames = arguments.value(-1, "-f");
 
-    // if we are multisampling then to enable copying of the depth buffer we have to enable a depth buffer resolve extensions in vsg::RenderPass that requires a minim vulkan version of 1.2
+    // if we are multisampling then to enable copying of the depth buffer we have to enable a depth buffer resolve extension for vsg::RenderPass or require a minimum vulkan version of 1.2
     if (windowTraits->samples != VK_SAMPLE_COUNT_1_BIT) windowTraits->vulkanVersion = VK_API_VERSION_1_2;
 
     uint32_t vk_major = 1, vk_minor = 0;
@@ -536,8 +536,8 @@ int main(int argc, char** argv)
         char c;
         std::stringstream vk_version_str(vk_version);
         vk_version_str >> vk_major >> c >> vk_minor;
-        std::cout<<"vk_major = "<<vk_major<<std::endl;
-        std::cout<<"vk_minor = "<<vk_minor<<std::endl;
+        std::cout << "vk_major = " << vk_major << std::endl;
+        std::cout << "vk_minor = " << vk_minor << std::endl;
     }
 
     if (arguments.errors()) return arguments.writeErrorMessages(std::cerr);
@@ -553,7 +553,7 @@ int main(int argc, char** argv)
 
     if (vsg_scene->children.empty())
     {
-        std::cout << "Please specify a 3d model file on the command line." << std::endl;
+        std::cout << "Please specify a valid 3d model file on the command line." << std::endl;
         return 1;
     }
 
@@ -562,7 +562,7 @@ int main(int argc, char** argv)
     auto window = vsg::Window::create(windowTraits);
     if (!window)
     {
-        std::cout << "Could not create windows." << std::endl;
+        std::cout << "Could not create window." << std::endl;
         return 1;
     }
 
@@ -605,12 +605,12 @@ int main(int argc, char** argv)
 
     auto camera = vsg::Camera::create(perspective, lookAt, vsg::ViewportState::create(window->extent2D()));
 
-    // add close handler to respond the close window button and pressing escape
+    // add close handler to respond to the close window button and pressing escape
     viewer->addEventHandler(vsg::CloseHandler::create(viewer));
 
     viewer->addEventHandler(vsg::Trackball::create(camera));
 
-    auto event = vsg::Event::create_if(use_vkEvent, window->getOrCreateDevice()); // Vulkan creates vkEvent in an unsignalled state
+    auto event = vsg::Event::create_if(use_vkEvent, window->getOrCreateDevice()); // Vulkan creates VkEvent in an unsignalled state
 
     // Add ScreenshotHandler to respond to keyboard and mouse events.
     auto screenshotHandler = ScreenshotHandler::create(event, colorFilename, depthFilename, options);

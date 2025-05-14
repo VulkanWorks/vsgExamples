@@ -31,7 +31,7 @@ vsg::ref_ptr<vsg::Node> createSkybox(const vsg::Path& filename, vsg::ref_ptr<vsg
     auto descriptorSetLayout = vsg::DescriptorSetLayout::create(descriptorBindings);
 
     vsg::PushConstantRanges pushConstantRanges{
-        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection view, and model matrices, actual push constant calls automatically provided by the VSG's DispatchTraversal
+        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection, view, and model matrices, actual push constant calls automatically provided by the VSG's RecordTraversal
     };
 
     vsg::VertexInputState::Bindings vertexBindingsDescriptions{
@@ -145,7 +145,6 @@ vsg::ref_ptr<vsg::Node> createSkybox(const vsg::Path& filename, vsg::ref_ptr<vsg
 
 int main(int argc, char** argv)
 {
-    // set up defaults and read command line arguments to override them
     auto options = vsg::Options::create();
     options->paths = vsg::getEnvPaths("VSG_FILE_PATH");
 
@@ -188,10 +187,9 @@ int main(int argc, char** argv)
     arguments.read("--display", windowTraits->display);
     arguments.read("--samples", windowTraits->samples);
     auto numFrames = arguments.value(-1, "-f");
-    auto pathFilename = arguments.value(std::string(), "-p");
     auto horizonMountainHeight = arguments.value(0.0, "--hmh");
-    auto skyboxFilename = arguments.value(vsg::Path(), "--skybox");
-    auto outputFilename = arguments.value(vsg::Path(), "-o");
+    auto skyboxFilename = arguments.value<vsg::Path>("textures/skybox.dds", "--skybox");
+    auto outputFilename = arguments.value<vsg::Path>("", "-o");
 
     if (arguments.errors()) return arguments.writeErrorMessages(std::cerr);
 
@@ -234,7 +232,7 @@ int main(int argc, char** argv)
 
     if (group->children.empty())
     {
-        std::cout << "Please specify a 3d model file on the command line." << std::endl;
+        std::cout << "Please specify a valid 3d model file on the command line." << std::endl;
         return 1;
     }
 
@@ -255,7 +253,7 @@ int main(int argc, char** argv)
     auto window = vsg::Window::create(windowTraits);
     if (!window)
     {
-        std::cout << "Could not create windows." << std::endl;
+        std::cout << "Could not create window." << std::endl;
         return 1;
     }
 
@@ -283,7 +281,7 @@ int main(int argc, char** argv)
 
     auto camera = vsg::Camera::create(perspective, lookAt, vsg::ViewportState::create(window->extent2D()));
 
-    // add close handler to respond the close window button and pressing escape
+    // add close handler to respond to the close window button and pressing escape
     viewer->addEventHandler(vsg::CloseHandler::create(viewer));
     viewer->addEventHandler(vsg::Trackball::create(camera));
 

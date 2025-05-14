@@ -8,7 +8,6 @@
 class FindVertexData : public vsg::Visitor
 {
 public:
-
     void apply(vsg::Object& object)
     {
         object.traverse(*this);
@@ -18,18 +17,21 @@ public:
     {
         if (geometry.arrays.empty()) return;
         geometry.arrays[0]->data->accept(*this);
+        bufferInfoSet.insert(geometry.arrays[0]);
     }
 
     void apply(vsg::VertexIndexDraw& vid)
     {
         if (vid.arrays.empty()) return;
         vid.arrays[0]->data->accept(*this);
+        bufferInfoSet.insert(vid.arrays[0]);
     }
 
     void apply(vsg::BindVertexBuffers& bvd)
     {
         if (bvd.arrays.empty()) return;
         bvd.arrays[0]->data->accept(*this);
+        bufferInfoSet.insert(bvd.arrays[0]);
     }
 
     void apply(vsg::vec3Array& vertices)
@@ -40,12 +42,11 @@ public:
         }
     }
 
-
     std::vector<vsg::ref_ptr<vsg::vec3Array>> getVerticesList()
     {
         std::vector<vsg::ref_ptr<vsg::vec3Array>> verticesList(verticesSet.size());
         auto vertices_itr = verticesList.begin();
-        for(auto& vertices : verticesSet)
+        for (auto& vertices : verticesSet)
         {
             (*vertices_itr++) = const_cast<vsg::vec3Array*>(vertices);
         }
@@ -54,6 +55,7 @@ public:
     }
 
     std::set<vsg::vec3Array*> verticesSet;
+    std::set<vsg::ref_ptr<vsg::BufferInfo>> bufferInfoSet;
 };
 
 int main(int argc, char** argv)
@@ -63,7 +65,7 @@ int main(int argc, char** argv)
         // set up defaults and read command line arguments to override them
         vsg::CommandLine arguments(&argc, argv);
 
-        // set up vsg::Options to pass in filepaths and ReaderWriter's and other IO related options to use when reading and writing files.
+        // set up vsg::Options to pass in filepaths, ReaderWriters and other IO related options to use when reading and writing files.
         auto options = vsg::Options::create();
         options->fileCache = vsg::getEnv("VSG_FILE_CACHE");
         options->paths = vsg::getEnvPaths("VSG_FILE_PATH");
@@ -99,10 +101,15 @@ int main(int argc, char** argv)
         auto numFrames = arguments.value(-1, "-f");
 
         bool multiThreading = arguments.read("--mt");
-        auto modify = arguments.read("--modify");
+        auto modify = !arguments.read("--no-modify");
         auto dirty = arguments.read("--dirty");
-        auto dynamic = arguments.read("--dynamic") || dirty || modify;
-        bool lateTransfer = arguments.read("--late");
+
+        // set the dynamic hint to tell the Viewer::compile() to assign this vsg::Data to a vsg::TransferTask
+        vsg::DataVariance dataVariance = vsg::DYNAMIC_DATA;
+        if (arguments.read("--static"))
+            dataVariance = vsg::STATIC_DATA;
+        else if (arguments.read("--late"))
+            dataVariance = vsg::DYNAMIC_DATA_TRANSFER_AFTER_RECORD;
 
         if (arguments.errors()) return arguments.writeErrorMessages(std::cerr);
 
@@ -120,16 +127,15 @@ int main(int argc, char** argv)
             return 1;
         }
 
-        // visit the scene graph to collect all the vertex arrays;
+        // visit the scene graph to collect all the vertex arrays
         size_t numVertices = 0;
-        auto verticesList = vsg::visit<FindVertexData>(vsg_scene).getVerticesList();
-        if (dynamic)
+        FindVertexData fdv;
+        vsg_scene->accept(fdv);
+        auto verticesList = fdv.getVerticesList();
+        for (auto& vertices : verticesList)
         {
-            for(auto& vertices : verticesList)
-            {
-                vertices->properties.dataVariance = lateTransfer ? vsg::DYNAMIC_DATA_TRANSFER_AFTER_RECORD : vsg::DYNAMIC_DATA;
-                numVertices += vertices->size();
-            }
+            vertices->properties.dataVariance = dataVariance;
+            numVertices += vertices->size();
         }
 
         vsg::info("number of dynamic vertex arrays : ", verticesList.size());
@@ -142,13 +148,13 @@ int main(int argc, char** argv)
         auto window = vsg::Window::create(windowTraits);
         if (!window)
         {
-            std::cout << "Could not create windows." << std::endl;
+            std::cout << "Could not create window." << std::endl;
             return 1;
         }
 
         viewer->addWindow(window);
 
-        // compute the bounds of the scene graph to help position camera
+        // compute the bounds of the scene graph to help position the camera
         vsg::ComputeBounds computeBounds;
         vsg_scene->accept(computeBounds);
         vsg::dvec3 centre = (computeBounds.bounds.min + computeBounds.bounds.max) * 0.5;
@@ -171,7 +177,7 @@ int main(int argc, char** argv)
 
         auto camera = vsg::Camera::create(perspective, lookAt, vsg::ViewportState::create(window->extent2D()));
 
-        // assign a CloseHandler to the Viewer to respond to pressing Escape or press the window close button
+        // assign a CloseHandler to the Viewer to respond to pressing Escape or a press of the window close button
         viewer->addEventHandler(vsg::CloseHandler::create(viewer));
 
         // add trackball to control the Camera
@@ -181,7 +187,6 @@ int main(int argc, char** argv)
         auto commandGraph = vsg::createCommandGraphForView(window, camera, vsg_scene);
 
         viewer->assignRecordAndSubmitTaskAndPresentation({commandGraph});
-
 
         vsg::info("multiThreading = ", multiThreading);
         if (multiThreading) viewer->setupThreading();
@@ -203,18 +208,34 @@ int main(int argc, char** argv)
 
             if (modify)
             {
-                for(auto& vertices : verticesList)
+                for (auto& vertices : verticesList)
                 {
-                    for(auto& v : *vertices)
+                    for (auto& v : *vertices)
                     {
-                        v.z += (sin(vsg::PI * frameCount / 180.0) * radius * 0.001);
+                        v.z += static_cast<float>(sin(vsg::PI * frameCount / 180.0) * radius * 0.001);
                     }
                     vertices->dirty();
+                }
+
+                if (dataVariance == vsg::STATIC_DATA)
+                {
+                    // If the data variance is static then we have to manually
+                    // assign the buffer info we want to transfer on each frame.
+                    // This approach is most apporopriate for occassional updates
+                    // for updates every frame it's best to declare the dataVaraince as DYANMIC_DATA
+                    for (auto& tasks : viewer->recordAndSubmitTasks)
+                    {
+                        auto transferTask = tasks->transferTask;
+                        for (auto& bufferInfo : fdv.bufferInfoSet)
+                        {
+                            transferTask->assign(vsg::BufferInfoList{bufferInfo});
+                        }
+                    }
                 }
             }
             else if (dirty)
             {
-                for(auto& vertices : verticesList)
+                for (auto& vertices : verticesList)
                 {
                     vertices->dirty();
                 }
@@ -227,7 +248,7 @@ int main(int argc, char** argv)
         auto fps = frameCount / (std::chrono::duration<double, std::chrono::seconds::period>(std::chrono::steady_clock::now() - startTime).count());
         double transferSpeed = (double)(numVertices * sizeof(vsg::vec3) * fps);
         std::cout << "Average fps = " << fps << std::endl;
-        std::cout << "Average transfer speed " <<(transferSpeed) / (1024.0 * 1024.0) << " Mb/sec"<<std::endl;
+        std::cout << "Average transfer speed " << (transferSpeed) / (1024.0 * 1024.0) << " Mb/sec" << std::endl;
     }
     catch (const vsg::Exception& exception)
     {

@@ -75,13 +75,13 @@ vsg::ref_ptr<vsg::Node> createQuad(const vsg::vec3& origin, const vsg::vec3& hor
 
     // set up graphics pipeline
     vsg::DescriptorSetLayoutBindings descriptorBindings{
-        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorTpe, descriptorCount, stageFlags, pImmutableSamplers}
+        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorType, descriptorCount, stageFlags, pImmutableSamplers}
     };
 
     auto descriptorSetLayout = vsg::DescriptorSetLayout::create(descriptorBindings);
 
     vsg::PushConstantRanges pushConstantRanges{
-        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection view, and model matrices, actual push constant calls automatically provided by the VSG's DispatchTraversal
+        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection, view, and model matrices, actual push constant calls automatically provided by the VSG's RecordTraversal
     };
 
     vsg::VertexInputState::Bindings vertexBindingsDescriptions{
@@ -114,7 +114,7 @@ vsg::ref_ptr<vsg::Node> createQuad(const vsg::vec3& origin, const vsg::vec3& hor
     auto descriptorSet = vsg::DescriptorSet::create(descriptorSetLayout, vsg::Descriptors{texture});
     auto bindDescriptorSets = vsg::BindDescriptorSets::create(VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, vsg::DescriptorSets{descriptorSet});
 
-    // create StateGroup as the root of the scene/command graph to hold the GraphicsProgram, and binding of Descriptors to decorate the whole graph
+    // create StateGroup as the root of the scene/command graph to hold the GraphicsPipeline, and binding of Descriptors to decorate the whole graph
     auto scenegraph = vsg::StateGroup::create();
     scenegraph->add(bindGraphicsPipeline);
     scenegraph->add(bindDescriptorSets);
@@ -138,7 +138,7 @@ vsg::ref_ptr<vsg::Node> createQuad(const vsg::vec3& origin, const vsg::vec3& hor
          {1.0f, 1.0f, 1.0f},
          {1.0f, 1.0f, 1.0f}}); // VK_FORMAT_R32G32B32_SFLOAT, VK_VERTEX_INPUT_RATE_VERTEX, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE
 
-    bool top_left = textureData->properties.origin == vsg::TOP_LEFT; // in Vulkan the origin is by default top left.
+    bool top_left = textureData->properties.origin == vsg::TOP_LEFT; // in Vulkan the origin is in the top left corner by default.
     float left = 0.0f;
     float right = 1.0f;
     float top = top_left ? 0.0f : 1.0f;
@@ -194,16 +194,15 @@ int main(int argc, char** argv)
     arguments.read(options);
 
     auto font = vsg::read_cast<vsg::Font>(font_filename, options);
-
     if (!font)
     {
-        std::cout << "Failing to read font : " << font_filename << std::endl;
+        std::cout << "Failed to read font : " << font_filename << std::endl;
         return 1;
     }
 
     if (disableDepthTest)
     {
-        // assign a custom StateSet to options->shaderSets so that subsequent TextGroup::setup(0, options) call will pass in our custom ShaderSet.
+        // assign a custom ShaderSet to options->shaderSets so that subsequent Text::setup(0, options) call will pass in our custom ShaderSet.
         auto shaderSet = options->shaderSets["text"] = vsg::createTextShaderSet(options);
 
         // create a DepthStencilState, disable depth test and add this to the ShaderSet::defaultGraphicsPipelineStates container so it's used when setting up the TextGroup subgraph
@@ -214,6 +213,11 @@ int main(int argc, char** argv)
 
     // set up model transformation node
     auto scenegraph = vsg::Group::create();
+
+    // dynamic_text is updated in the main loop when setup.
+    vsg::ref_ptr<vsg::Text> dynamic_text;
+    vsg::ref_ptr<vsg::stringValue> dynamic_text_label;
+    vsg::ref_ptr<vsg::StandardLayout> dynamic_text_layout;
 
     if (render_all_glyphs)
     {
@@ -230,8 +234,8 @@ int main(int argc, char** argv)
         }
 
         size_t num_glyphs = characters.size();
-        size_t row_lenghth = static_cast<size_t>(ceil(sqrt(float(num_glyphs))));
-        size_t num_rows = num_glyphs / row_lenghth;
+        size_t row_length = static_cast<size_t>(ceil(sqrt(float(num_glyphs))));
+        size_t num_rows = num_glyphs / row_length;
         if ((num_glyphs % num_rows) != 0) ++num_rows;
 
         // use an uintArray to store the text string as the full font charcodes can go up to very large values.
@@ -248,7 +252,7 @@ int main(int argc, char** argv)
 
             (*text_itr++) = c;
 
-            if (column >= row_lenghth)
+            if (column >= row_length)
             {
                 (*text_itr++) = '\n';
                 column = 0;
@@ -272,7 +276,7 @@ int main(int argc, char** argv)
             layout->horizontal = vsg::vec3(1.0, 0.0, 0.0);
             layout->vertical = vsg::vec3(0.0, 1.0, 0.0);
             layout->color = vsg::vec4(1.0, 1.0, 1.0, 1.0);
-            layout->outlineWidth = 0.1;
+            layout->outlineWidth = 0.1f;
             layout->billboard = true;
 
             auto text = vsg::Text::create();
@@ -284,8 +288,8 @@ int main(int argc, char** argv)
 
             if (enable_tests)
             {
-                auto quad = createQuad(layout->position, layout->horizontal, layout->vertical);
-                scenegraph->addChild(quad);
+                if (auto quad = createQuad(layout->position, layout->horizontal, layout->vertical))
+                    scenegraph->addChild(quad);
             }
         }
 
@@ -306,8 +310,8 @@ int main(int argc, char** argv)
 
             if (enable_tests)
             {
-                auto quad = createQuad(layout->position, layout->horizontal, layout->vertical);
-                scenegraph->addChild(quad);
+                if (auto quad = createQuad(layout->position, layout->horizontal, layout->vertical))
+                    scenegraph->addChild(quad);
             }
         }
 
@@ -328,8 +332,8 @@ int main(int argc, char** argv)
 
             if (enable_tests)
             {
-                auto quad = createQuad(layout->position, layout->horizontal, layout->vertical);
-                scenegraph->addChild(quad);
+                if (auto quad = createQuad(layout->position, layout->horizontal, layout->vertical))
+                    scenegraph->addChild(quad);
             }
         }
 
@@ -350,8 +354,8 @@ int main(int argc, char** argv)
 
             if (enable_tests)
             {
-                auto quad = createQuad(layout->position, layout->horizontal, layout->vertical);
-                scenegraph->addChild(quad);
+                if (auto quad = createQuad(layout->position, layout->horizontal, layout->vertical))
+                    scenegraph->addChild(quad);
             }
         }
 
@@ -372,8 +376,8 @@ int main(int argc, char** argv)
 
             if (enable_tests)
             {
-                auto quad = createQuad(layout->position, layout->horizontal, layout->vertical);
-                scenegraph->addChild(quad);
+                if (auto quad = createQuad(layout->position, layout->horizontal, layout->vertical))
+                    scenegraph->addChild(quad);
             }
         }
 
@@ -394,8 +398,8 @@ int main(int argc, char** argv)
 
             if (enable_tests)
             {
-                auto quad = createQuad(layout->position, layout->horizontal, layout->vertical);
-                scenegraph->addChild(quad);
+                if (auto quad = createQuad(layout->position, layout->horizontal, layout->vertical))
+                    scenegraph->addChild(quad);
             }
         }
 
@@ -416,8 +420,8 @@ int main(int argc, char** argv)
 
             if (enable_tests)
             {
-                auto quad = createQuad(layout->position, layout->horizontal, layout->vertical);
-                scenegraph->addChild(quad);
+                if (auto quad = createQuad(layout->position, layout->horizontal, layout->vertical))
+                    scenegraph->addChild(quad);
             }
         }
 
@@ -439,8 +443,8 @@ int main(int argc, char** argv)
 
             if (enable_tests)
             {
-                auto quad = createQuad(layout->position, layout->horizontal, layout->vertical);
-                scenegraph->addChild(quad);
+                if (auto quad = createQuad(layout->position, layout->horizontal, layout->vertical))
+                    scenegraph->addChild(quad);
             }
         }
 
@@ -462,8 +466,8 @@ int main(int argc, char** argv)
 
             if (enable_tests)
             {
-                auto quad = createQuad(layout->position, layout->horizontal, layout->vertical);
-                scenegraph->addChild(quad);
+                if (auto quad = createQuad(layout->position, layout->horizontal, layout->vertical))
+                    scenegraph->addChild(quad);
             }
         }
 
@@ -485,8 +489,8 @@ int main(int argc, char** argv)
 
             if (enable_tests)
             {
-                auto quad = createQuad(layout->position, layout->horizontal, layout->vertical);
-                scenegraph->addChild(quad);
+                if (auto quad = createQuad(layout->position, layout->horizontal, layout->vertical))
+                    scenegraph->addChild(quad);
             }
         }
 
@@ -506,7 +510,7 @@ int main(int argc, char** argv)
                         {
                             quad.vertices[i].z += 0.5f * sin(quad.vertices[i].x);
                             quad.colors[i].r = 0.5f + 0.5f * sin(quad.vertices[i].x);
-                            quad.outlineColors[i] = vsg::vec4(cos(0.5 * quad.vertices[i].x), 0.1f, 0.0f, 1.0f);
+                            quad.outlineColors[i] = vsg::vec4(cos(0.5f * quad.vertices[i].x), 0.1f, 0.0f, 1.0f);
                             quad.outlineWidths[i] = 0.1f + 0.15f * (1.0f + sin(quad.vertices[i].x));
                         }
                     }
@@ -526,27 +530,27 @@ int main(int argc, char** argv)
             text->setup(0, options);
             scenegraph->addChild(text);
         }
-    }
 
-    auto dynamic_text_label = vsg::stringValue::create("GpuLayoutTechnique");
-    auto dynamic_text_layout = vsg::StandardLayout::create();
-    auto dynamic_text = vsg::Text::create();
-    {
-        // currently vsg::GpuLayoutTechnique is the only technique that supports dynamic update of the text parameters
-        dynamic_text->technique = vsg::GpuLayoutTechnique::create();
+        dynamic_text_label = vsg::stringValue::create("GpuLayoutTechnique");
+        dynamic_text_layout = vsg::StandardLayout::create();
+        dynamic_text = vsg::Text::create();
+        {
+            // currently vsg::GpuLayoutTechnique is the only technique that supports dynamic updating of the text parameters
+            dynamic_text->technique = vsg::GpuLayoutTechnique::create();
 
-        dynamic_text_layout->billboard = true;
-        dynamic_text_layout->position = vsg::vec3(0.0, 0.0, -6.0);
-        dynamic_text_layout->horizontal = vsg::vec3(1.0, 0.0, 0.0);
-        dynamic_text_layout->vertical = dynamic_text_layout->billboard ? vsg::vec3(0.0, 1.0, 0.0) : vsg::vec3(0.0, 0.0, 1.0) ;
-        dynamic_text_layout->color = vsg::vec4(1.0, 0.9, 1.0, 1.0);
-        dynamic_text_layout->outlineWidth = 0.1;
+            dynamic_text_layout->billboard = true;
+            dynamic_text_layout->position = vsg::vec3(0.0, 0.0, -6.0);
+            dynamic_text_layout->horizontal = vsg::vec3(1.0, 0.0, 0.0);
+            dynamic_text_layout->vertical = dynamic_text_layout->billboard ? vsg::vec3(0.0, 1.0, 0.0) : vsg::vec3(0.0, 0.0, 1.0);
+            dynamic_text_layout->color = vsg::vec4(1.0f, 0.9f, 1.0f, 1.0f);
+            dynamic_text_layout->outlineWidth = 0.1f;
 
-        dynamic_text->text = dynamic_text_label;
-        dynamic_text->font = font;
-        dynamic_text->layout = dynamic_text_layout;
-        dynamic_text->setup(32); // allocate enough space for max possible characters
-        scenegraph->addChild(dynamic_text);
+            dynamic_text->text = dynamic_text_label;
+            dynamic_text->font = font;
+            dynamic_text->layout = dynamic_text_layout;
+            dynamic_text->setup(32); // allocate enough space for max possible characters
+            scenegraph->addChild(dynamic_text);
+        }
     }
 
     if (!output_filename.empty())
@@ -565,7 +569,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    window->clearColor() = VkClearColorValue{{clearColor.r, clearColor.g, clearColor.b, clearColor.a}};
+    window->clearColor() = vsg::sRGB_to_linear(clearColor);
 
     viewer->addWindow(window);
 
@@ -592,16 +596,19 @@ int main(int argc, char** argv)
     // assign Trackball
     viewer->addEventHandler(vsg::Trackball::create(camera));
 
-    // assign a CloseHandler to the Viewer to respond to pressing Escape or press the window close button
+    // assign a CloseHandler to the Viewer to respond to pressing Escape or the window close button
     viewer->addEventHandlers({vsg::CloseHandler::create(viewer)});
 
     // main frame loop
     while (viewer->advanceToNextFrame() && (numFrames < 0 || (numFrames--) > 0))
     {
-        // update the dynamic_text label string and position
-        dynamic_text_label->value() = vsg::make_string("GpuLayoutTechnique: ", viewer->getFrameStamp()->frameCount);
-        dynamic_text_layout->position.x += 0.01;
-        dynamic_text->setup(0, options);
+        if (dynamic_text)
+        {
+            // update the dynamic_text label string and position
+            dynamic_text_label->value() = vsg::make_string("GpuLayoutTechnique: ", viewer->getFrameStamp()->frameCount);
+            dynamic_text_layout->position.x += 0.01f;
+            dynamic_text->setup(0, options);
+        }
 
         // pass any events into EventHandlers assigned to the Viewer
         viewer->handleEvents();

@@ -12,7 +12,7 @@ int main(int argc, char** argv)
     // set up defaults and read command line arguments to override them
     vsg::CommandLine arguments(&argc, argv);
 
-    // set up vsg::Options to pass in filepaths and ReaderWriter's and other IO related options to use when reading and writing files.
+    // set up vsg::Options to pass in filepaths, ReaderWriters and other IO related options to use when reading and writing files.
     auto options = vsg::Options::create();
     options->sharedObjects = vsg::SharedObjects::create();
     options->fileCache = vsg::getEnv("VSG_FILE_CACHE");
@@ -26,10 +26,9 @@ int main(int argc, char** argv)
     arguments.read(options);
 
     auto windowTraits = vsg::WindowTraits::create();
-    windowTraits->windowTitle = "vsgviewer";
+    windowTraits->windowTitle = "vsgtimestamps";
     windowTraits->debugLayer = arguments.read({"--debug", "-d"});
     windowTraits->apiDumpLayer = arguments.read({"--api", "-a"});
-    if (int mt = 0; arguments.read({"--memory-tracking", "--mt"}, mt)) vsg::Allocator::instance()->setMemoryTracking(mt);
     if (arguments.read("--double-buffer")) windowTraits->swapchainPreferences.imageCount = 2;
     if (arguments.read("--triple-buffer")) windowTraits->swapchainPreferences.imageCount = 3; // default
     if (arguments.read("--IMMEDIATE")) windowTraits->swapchainPreferences.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
@@ -56,7 +55,7 @@ int main(int argc, char** argv)
     arguments.read("--display", windowTraits->display);
     arguments.read("--samples", windowTraits->samples);
     auto numFrames = arguments.value(-1, "-f");
-    auto pathFilename = arguments.value(std::string(), "-p");
+    auto pathFilename = arguments.value<vsg::Path>("", "-p");
     if (arguments.read("--rgb")) options->mapRGBtoRGBAHint = false;
 
     if (int log_level = 0; arguments.read("--log-level", log_level)) vsg::Logger::instance()->level = vsg::Logger::Level(log_level);
@@ -93,30 +92,30 @@ int main(int argc, char** argv)
     auto window = vsg::Window::create(windowTraits);
     if (!window)
     {
-        std::cout << "Could not create windows." << std::endl;
+        std::cout << "Could not create window." << std::endl;
         return 1;
     }
 
     viewer->addWindow(window);
 
     auto physicalDevice = window->getOrCreatePhysicalDevice();
-    std::cout<<"physicalDevice = " << physicalDevice << std::endl;
-    for(auto& queueFamilyProperties : physicalDevice->getQueueFamilyProperties())
+    std::cout << "physicalDevice = " << physicalDevice << std::endl;
+    for (auto& queueFamilyProperties : physicalDevice->getQueueFamilyProperties())
     {
-        std::cout<<"    queueFamilyProperties.timestampValidBits = " << queueFamilyProperties.timestampValidBits << std::endl;
+        std::cout << "    queueFamilyProperties.timestampValidBits = " << queueFamilyProperties.timestampValidBits << std::endl;
     }
 
     const auto& limits = physicalDevice->getProperties().limits;
-    std::cout<<"    limits.timestampComputeAndGraphics = " << limits.timestampComputeAndGraphics << std::endl;
-    std::cout<<"    limits.timestampPeriod = " << limits.timestampPeriod << " nanoseconds."<<std::endl;
+    std::cout << "    limits.timestampComputeAndGraphics = " << limits.timestampComputeAndGraphics << std::endl;
+    std::cout << "    limits.timestampPeriod = " << limits.timestampPeriod << " nanoseconds." << std::endl;
 
     if (!limits.timestampComputeAndGraphics)
     {
-        std::cout<<"Timestamps not supported by device."<<std::endl;
+        std::cout << "Timestamps not supported by device." << std::endl;
         return 1;
     }
 
-    double timestampScaleToMilliseconds = 10e-6 * static_cast<double>(limits.timestampPeriod);
+    double timestampScaleToMilliseconds = 1e-6 * static_cast<double>(limits.timestampPeriod);
 
     // compute the bounds of the scene graph to help position camera
     vsg::ComputeBounds computeBounds;
@@ -141,30 +140,21 @@ int main(int argc, char** argv)
 
     auto camera = vsg::Camera::create(perspective, lookAt, vsg::ViewportState::create(window->extent2D()));
 
-    // add close handler to respond the close window button and pressing escape
+    // add close handler to respond to the close window button and pressing escape
     viewer->addEventHandler(vsg::CloseHandler::create(viewer));
 
-    if (pathFilename.empty())
+    if (pathFilename)
     {
-        viewer->addEventHandler(vsg::Trackball::create(camera, ellipsoidModel));
+        auto cameraAnimation = vsg::CameraAnimationHandler::create(camera, pathFilename, options);
+        viewer->addEventHandler(cameraAnimation);
+        if (cameraAnimation->animation) cameraAnimation->play();
     }
-    else
-    {
-        auto animationPath = vsg::read_cast<vsg::AnimationPath>(pathFilename, options);
-        if (!animationPath)
-        {
-            std::cout<<"Warning: unable to read animation path : "<<pathFilename<<std::endl;
-            return 1;
-        }
 
-        auto animationPathHandler = vsg::AnimationPathHandler::create(camera, animationPath, viewer->start_point());
-        animationPathHandler->printFrameStatsToConsole = true;
-        viewer->addEventHandler(animationPathHandler);
-    }
+    viewer->addEventHandler(vsg::Trackball::create(camera, ellipsoidModel));
 
     auto commandGraph = vsg::CommandGraph::create(window);
 
-    // create the query pool to to collect timing info
+    // create the query pool to collect timing info
     auto query_pool = vsg::QueryPool::create();
     query_pool->queryType = VK_QUERY_TYPE_TIMESTAMP;
     query_pool->queryCount = 2;
@@ -204,7 +194,7 @@ int main(int argc, char** argv)
         if (query_pool->getResults(timestamps) == VK_SUCCESS)
         {
             auto delta = timestampScaleToMilliseconds * static_cast<double>(timestamps[1] - timestamps[0]);
-            std::cout<<"delta = "<<delta<<"ms"<<std::endl;
+            std::cout << "delta = " << delta << "ms" << std::endl;
         }
     }
 

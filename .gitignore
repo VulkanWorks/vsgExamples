@@ -21,6 +21,7 @@ CMakeDoxygenDefaults.cmake
 Doxyfile.docs
 Doxyfile.docs-vsgExamples
 
+html/
 
 # Compiled Object files
 *.slo
@@ -62,6 +63,10 @@ src/vsg/vsg.dir/
 *.pdb
 *.tlog
 *.log
+*.ilk
+*.dll.recipe
+*.exe.recipe
+*.lib.recipe
 
 # Xcode
 DerivedData/

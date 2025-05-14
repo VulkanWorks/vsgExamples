@@ -40,13 +40,13 @@ vsg::ref_ptr<vsg::Node> createScene(vsg::ref_ptr<const vsg::Options> options)
 
     // set up graphics pipeline
     vsg::DescriptorSetLayoutBindings descriptorBindings{
-        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorTpe, descriptorCount, stageFlags, pImmutableSamplers}
+        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr} // { binding, descriptorType, descriptorCount, stageFlags, pImmutableSamplers}
     };
 
     auto descriptorSetLayout = vsg::DescriptorSetLayout::create(descriptorBindings);
 
     vsg::PushConstantRanges pushConstantRanges{
-        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection view, and model matrices, actual push constant calls automatically provided by the VSG's DispatchTraversal
+        {VK_SHADER_STAGE_VERTEX_BIT, 0, 128} // projection, view, and model matrices, actual push constant calls automatically provided by the VSG's RecordTraversal
     };
 
     vsg::VertexInputState::Bindings vertexBindingsDescriptions{
@@ -79,7 +79,7 @@ vsg::ref_ptr<vsg::Node> createScene(vsg::ref_ptr<const vsg::Options> options)
     auto descriptorSet = vsg::DescriptorSet::create(descriptorSetLayout, vsg::Descriptors{texture});
     auto bindDescriptorSets = vsg::BindDescriptorSets::create(VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline->layout, 0, vsg::DescriptorSets{descriptorSet});
 
-    // create StateGroup as the root of the scene/command graph to hold the GraphicsProgram, and binding of Descriptors to decorate the whole graph
+    // create StateGroup as the root of the scene/command graph to hold the GraphicsPipeline, and binding of Descriptors to decorate the whole graph
     auto scenegraph = vsg::StateGroup::create();
     scenegraph->add(bindGraphicsPipeline);
     scenegraph->add(bindDescriptorSets);
@@ -151,7 +151,7 @@ int main(int argc, char** argv)
 
     vsg::CommandLine arguments(&argc, argv);
 
-    // set up vsg::Options to pass in filepaths and ReaderWriter's and other IO related options to use when reading and writing files.
+    // set up vsg::Options to pass in filepaths, ReaderWriters and other IO related options to use when reading and writing files.
     auto options = vsg::Options::create();
     options->fileCache = vsg::getEnv("VSG_FILE_CACHE");
     options->paths = vsg::getEnvPaths("VSG_FILE_PATH");
@@ -168,13 +168,12 @@ int main(int argc, char** argv)
     bool multiThreading = arguments.read("--mt");
     bool useExecuteCommands = !arguments.read("--no-ec"); // by default use ExecuteCommands, but allow it to be disabled using --no-ec
     auto numFrames = arguments.value(-1, "-f");
-    auto pathFilename = arguments.value(std::string(), "-p");
+    auto pathFilename = arguments.value<vsg::Path>("", "-p");
 
     if (arguments.errors()) return arguments.writeErrorMessages(std::cerr);
 
     vsg::Path filename;
     if (argc > 1) filename = arguments[1];
-
 
     vsg::ref_ptr<vsg::Node> vsg_scene;
     if (filename)
@@ -195,7 +194,6 @@ int main(int argc, char** argv)
     // create the viewer and assign window(s) to it
     auto viewer = vsg::Viewer::create();
 
-
     auto window1 = vsg::Window::create(traits);
     if (!window1)
     {
@@ -205,7 +203,7 @@ int main(int argc, char** argv)
 
     auto traits2 = vsg::WindowTraits::create(*traits);
     traits2->windowTitle = "vsgexecutecommands window2";
-    traits2->shareWindow = window1;
+    traits2->device = window1->getOrCreateDevice();
 
     auto window2 = vsg::Window::create(traits2);
     if (!window2)
@@ -243,16 +241,16 @@ int main(int argc, char** argv)
 
     if (useExecuteCommands)
     {
-        std::cout << "Using Secondary CommandGraph and ExecuteCommands" << std::endl;
-        auto seccommandGraph1 = vsg::createSecondaryCommandGraphForView(window1, camera, vsg_scene, 0);
+        std::cout << "Using SecondaryCommandGraph and ExecuteCommands" << std::endl;
+        auto secondaryCommandGraph = vsg::createSecondaryCommandGraphForView(window1, camera, vsg_scene, 0);
 
         auto scenegraphwin1 = vsg::Group::create();
         auto pass1 = vsg::ExecuteCommands::create();
-        pass1->connect(seccommandGraph1);
+        pass1->connect(secondaryCommandGraph);
 
         auto scenegraphwin2 = vsg::Group::create();
         auto pass2 = vsg::ExecuteCommands::create();
-        pass2->connect(seccommandGraph1);
+        pass2->connect(secondaryCommandGraph);
 
         scenegraphwin1->addChild(pass1);
         scenegraphwin2->addChild(pass2);
@@ -260,7 +258,7 @@ int main(int argc, char** argv)
         auto commandGraphwin1 = vsg::createCommandGraphForView(window1, camera, scenegraphwin1, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
         auto commandGraphwin2 = vsg::createCommandGraphForView(window2, camera, scenegraphwin2, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 
-        viewer->assignRecordAndSubmitTaskAndPresentation({seccommandGraph1, commandGraphwin1, commandGraphwin2});
+        viewer->assignRecordAndSubmitTaskAndPresentation({secondaryCommandGraph, commandGraphwin1, commandGraphwin2});
     }
     else
     {
@@ -276,23 +274,17 @@ int main(int argc, char** argv)
     // compile the Vulkan objects
     viewer->compile();
 
-    // assign a CloseHandler to the Viewer to respond to pressing Escape or press the window close button
+    // assign a CloseHandler to the Viewer to respond to pressing Escape or the window close button
     viewer->addEventHandlers({vsg::CloseHandler::create(viewer)});
 
-    if (pathFilename.empty())
+    if (pathFilename)
     {
-        viewer->addEventHandler(vsg::Trackball::create(camera));
+        auto cameraAnimation = vsg::CameraAnimationHandler::create(camera, pathFilename, options);
+        viewer->addEventHandler(cameraAnimation);
+        if (cameraAnimation->animation) cameraAnimation->play();
     }
-    else
-    {
-        auto animationPath = vsg::read_cast<vsg::AnimationPath>(pathFilename, options);
-        if (!animationPath)
-        {
-            std::cout<<"Warning: unable to read animation path : "<<pathFilename<<std::endl;
-            return 1;
-        }
-        viewer->addEventHandler(vsg::AnimationPathHandler::create(camera, animationPath, viewer->start_point()));
-    }
+
+    viewer->addEventHandler(vsg::Trackball::create(camera));
 
     // main frame loop
     while (viewer->advanceToNextFrame() && (numFrames < 0 || (numFrames--) > 0))

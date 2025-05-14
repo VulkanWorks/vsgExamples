@@ -9,79 +9,56 @@
 #include <iostream>
 #include <thread>
 
-class CustomAllocator : public vsg::Allocator
+class StdAllocator : public vsg::Allocator
 {
 public:
-
-    CustomAllocator(std::unique_ptr<Allocator> in_nestedAllocator = {}) :
+    StdAllocator(std::unique_ptr<Allocator> in_nestedAllocator = {}) :
         vsg::Allocator(std::move(in_nestedAllocator))
     {
-        if (memoryTracking & vsg::MEMORY_TRACKING_REPORT_ACTIONS)
-        {
-            std::cout<<"CustomAllocator()"<<this<<std::endl;
-        }
     }
 
-    ~CustomAllocator()
+    ~StdAllocator()
     {
-        if (memoryTracking & vsg::MEMORY_TRACKING_REPORT_ACTIONS)
-        {
-            std::cout<<"~CustomAllocator() "<<this<<std::endl;
-        }
     }
 
     void report(std::ostream& out) const override
     {
-        std::cout<<"CustomAllocator::report() "<<allocatorMemoryBlocks.size()<<std::endl;
-        vsg::Allocator::report(out);
+        out << "StdAllocator::report() " << std::endl;
     }
 
-    void* allocate(std::size_t size, vsg::AllocatorAffinity allocatorAffinity = vsg::ALLOCATOR_AFFINITY_OBJECTS) override
+    void* allocate(std::size_t size, vsg::AllocatorAffinity) override
     {
-        void* ptr = Allocator::allocate(size, allocatorAffinity);
-        if (memoryTracking & vsg::MEMORY_TRACKING_REPORT_ACTIONS)
-        {
-            std::cout<<"CustomAllocator::allocate("<<size<<", "<<allocatorAffinity<<") ptr = "<<ptr<<std::endl;
-        }
-        return ptr;
+        return operator new(size); //, std::align_val_t{default_alignment});
     }
 
     bool deallocate(void* ptr, std::size_t size) override
     {
-        if (memoryTracking & vsg::MEMORY_TRACKING_REPORT_ACTIONS)
-        {
-            std::cout<<"CustomAllocator::deallocate("<<ptr<<")"<<std::endl;
-        }
-        return Allocator::deallocate(ptr, size);
+        if (nestedAllocator && nestedAllocator->deallocate(ptr, size)) return true;
+
+        operator delete(ptr); //, std::align_val_t{default_alignment});
+        return true;
     }
+
+    size_t deleteEmptyMemoryBlocks() override { return 0; }
+    size_t totalAvailableSize() const override { return 0; }
+    size_t totalReservedSize() const override { return 0; }
+    size_t totalMemorySize() const override { return 0; }
+    void setBlockSize(vsg::AllocatorAffinity, size_t) {}
 };
 
-
-struct SceneStatstics : public vsg::Inherit<vsg::ConstVisitor, SceneStatstics>
+struct SceneStatistics : public vsg::Inherit<vsg::ConstVisitor, SceneStatistics>
 {
     std::map<const char*, size_t> objectCounts;
 
     void report(std::ostream& out)
     {
-        for(auto& [str, count] : objectCounts) out<<"  "<<str<<" "<<count<<std::endl;
+        for (auto& [str, count] : objectCounts) out << "  " << str << " " << count << std::endl;
     }
 
     void apply(const vsg::Node& node) override
     {
         ++objectCounts[node.className()];
         node.traverse(*this);
-    }
-
-    void apply(const vsg::StateGroup& stateGroup) override
-    {
-        ++objectCounts[stateGroup.className()];
-
-        for(auto& sc : stateGroup.stateCommands)
-        {
-            sc->accept(*this);
-        }
-
-        stateGroup.traverse(*this);
     }
 };
 
@@ -91,10 +68,9 @@ int main(int argc, char** argv)
     vsg::CommandLine arguments(&argc, argv);
 
     // Allocaotor related command line settings
-    if (arguments.read("--custom")) vsg::Allocator::instance().reset(new CustomAllocator(std::move(vsg::Allocator::instance())));
-    if (int mt; arguments.read({"--memory-tracking", "--mt"}, mt)) vsg::Allocator::instance()->setMemoryTracking(mt);
+    if (size_t alignment; arguments.read("--alignment", alignment)) vsg::Allocator::instance().reset(new vsg::IntrusiveAllocator(std::move(vsg::Allocator::instance()), alignment));
+    if (arguments.read("--std")) vsg::Allocator::instance().reset(new StdAllocator(std::move(vsg::Allocator::instance())));
     if (int type; arguments.read("--allocator", type)) vsg::Allocator::instance()->allocatorType = vsg::AllocatorType(type);
-    if (int  type; arguments.read("--blocks", type)) vsg::Allocator::instance()->memoryBlocksAllocatorType = vsg::AllocatorType(type);
     if (size_t objectsBlockSize; arguments.read("--objects", objectsBlockSize)) vsg::Allocator::instance()->setBlockSize(vsg::ALLOCATOR_AFFINITY_OBJECTS, objectsBlockSize);
     if (size_t nodesBlockSize; arguments.read("--nodes", nodesBlockSize)) vsg::Allocator::instance()->setBlockSize(vsg::ALLOCATOR_AFFINITY_NODES, nodesBlockSize);
     if (size_t dataBlockSize; arguments.read("--data", dataBlockSize)) vsg::Allocator::instance()->setBlockSize(vsg::ALLOCATOR_AFFINITY_DATA, dataBlockSize);
@@ -105,7 +81,7 @@ int main(int argc, char** argv)
 
     try
     {
-        // set up vsg::Options to pass in filepaths and ReaderWriter's and other IO related options to use when reading and writing files.
+        // set up vsg::Options to pass in filepaths, ReaderWriters and other IO related options to use when reading and writing files.
         auto options = vsg::Options::create();
         options->fileCache = vsg::getEnv("VSG_FILE_CACHE");
         options->paths = vsg::getEnvPaths("VSG_FILE_PATH");
@@ -125,7 +101,7 @@ int main(int argc, char** argv)
         if (arguments.read("--so"))
         {
             options->sharedObjects = vsg::SharedObjects::create();
-            std::cout<<"Assigned vsg::SharedObjects "<<options->sharedObjects<<std::endl;
+            std::cout << "Assigned vsg::SharedObjects " << options->sharedObjects << std::endl;
         }
 
         if (arguments.read("--double-buffer")) windowTraits->swapchainPreferences.imageCount = 2;
@@ -155,7 +131,7 @@ int main(int argc, char** argv)
         arguments.read("--samples", windowTraits->samples);
         bool reportAtEndOfAllFrames = arguments.read("--report");
         auto numFrames = arguments.value(-1, "-f");
-        auto pathFilename = arguments.value(std::string(), "-p");
+        auto pathFilename = arguments.value<vsg::Path>("", "-p");
         auto loadLevels = arguments.value(0, "--load-levels");
         auto horizonMountainHeight = arguments.value(0.0, "--hmh");
         auto maxPagedLOD = arguments.value(0, "--maxPagedLOD");
@@ -181,7 +157,7 @@ int main(int argc, char** argv)
 
         if (argc <= 1)
         {
-            std::cout << "Please specify a 3d model or image file on the command line." << std::endl;
+            std::cout << "Please specify a 3d model on the command line." << std::endl;
             return 1;
         }
 
@@ -218,14 +194,13 @@ int main(int argc, char** argv)
         // record the total time taken loading the scene graph
         loadDuration = std::chrono::duration<double, std::chrono::milliseconds::period>(vsg::clock::now() - startOfLoad).count();
 
-
         if (stats > 0)
         {
             auto startOfStats = vsg::clock::now();
 
-            auto sceneStatistics = SceneStatstics::create();
+            auto sceneStatistics = SceneStatistics::create();
 
-            for(size_t i=0; i<stats; ++i)
+            for (size_t i = 0; i < stats; ++i)
             {
                 sceneStatistics->objectCounts.clear();
                 vsg_scene->accept(*sceneStatistics);
@@ -233,10 +208,10 @@ int main(int argc, char** argv)
 
             auto statsDuration = std::chrono::duration<double, std::chrono::milliseconds::period>(vsg::clock::now() - startOfStats).count();
 
-            std::cout<<"Stats collection took "<<statsDuration<<"ms"<<" for "<<stats<<" traversals."<<std::endl;
+            std::cout << "Stats collection took " << statsDuration << "ms"
+                      << " for " << stats << " traversals." << std::endl;
             sceneStatistics->report(std::cout);
         }
-
 
         if (useViewer)
         {
@@ -245,7 +220,7 @@ int main(int argc, char** argv)
             auto window = vsg::Window::create(windowTraits);
             if (!window)
             {
-                std::cout << "Could not create windows." << std::endl;
+                std::cout << "Could not create window." << std::endl;
                 return 1;
             }
 
@@ -274,26 +249,17 @@ int main(int argc, char** argv)
 
             auto camera = vsg::Camera::create(perspective, lookAt, vsg::ViewportState::create(window->extent2D()));
 
-            // add close handler to respond the close window button and pressing escape
+            // add close handler to respond to the close window button and pressing escape
             viewer->addEventHandler(vsg::CloseHandler::create(viewer));
 
-            if (pathFilename.empty())
+            if (pathFilename)
             {
-                viewer->addEventHandler(vsg::Trackball::create(camera, ellipsoidModel));
+                auto cameraAnimation = vsg::CameraAnimationHandler::create(camera, pathFilename, options);
+                viewer->addEventHandler(cameraAnimation);
+                if (cameraAnimation->animation) cameraAnimation->play();
             }
-            else
-            {
-                auto animationPath = vsg::read_cast<vsg::AnimationPath>(pathFilename, options);
-                if (!animationPath)
-                {
-                    std::cout<<"Warning: unable to read animation path : "<<pathFilename<<std::endl;
-                    return 1;
-                }
 
-                auto animationPathHandler = vsg::AnimationPathHandler::create(camera, animationPath, viewer->start_point());
-                animationPathHandler->printFrameStatsToConsole = true;
-                viewer->addEventHandler(animationPathHandler);
-            }
+            viewer->addEventHandler(vsg::Trackball::create(camera, ellipsoidModel));
 
             // if required preload specific number of PagedLOD levels.
             if (loadLevels > 0)
@@ -316,7 +282,7 @@ int main(int argc, char** argv)
             if (maxPagedLOD > 0)
             {
                 // set targetMaxNumPagedLODWithHighResSubgraphs after Viewer::compile() as it will assign any DatabasePager if required.
-                for(auto& task : viewer->recordAndSubmitTasks)
+                for (auto& task : viewer->recordAndSubmitTasks)
                 {
                     if (task->databasePager) task->databasePager->targetMaxNumPagedLODWithHighResSubgraphs = maxPagedLOD;
                 }
@@ -349,7 +315,7 @@ int main(int argc, char** argv)
             }
         }
 
-        std::cout<<"\nBefore end of Viewer scoped."<<std::endl;
+        std::cout << "\nBefore end of Viewer scope." << std::endl;
         vsg::Allocator::instance()->report(std::cout);
 
         // record the end of viewer scope
@@ -367,22 +333,22 @@ int main(int argc, char** argv)
 
     double releaseDuration = std::chrono::duration<double, std::chrono::milliseconds::period>(vsg::clock::now() - endOfViewerScope).count();
 
-    std::cout<<"\nAfter end of Viewer scoped."<<std::endl;
+    std::cout << "\nAfter end of Viewer scope." << std::endl;
     vsg::Allocator::instance()->report(std::cout);
 
-    // Optional call to delete any empty memory blocks, this won't normally be reqired in a VSG application, but if your memory usage goes an duwn and down regularly and you want to free up memory
+    // Optional call to delete any empty memory blocks, this won't normally be required in a VSG application, but if your memory usage goes up and down regularly and you want to free up memory
     // for use elsewhere then you can call vsg::Allocator::instance()->deleteEmptyMemoryBlocks() after you delete scene graph nodes, data and objects to make sure any memory blocks that may now be empty can be
-    // released back to the OS. If you don't call deleteEmptyMemoryBlocks() the vsg::Allocator destructor will do all the clean up you on exit from the application.
+    // released back to the OS. If you don't call deleteEmptyMemoryBlocks() the vsg::Allocator destructor will do all the clean up for you on exit from the application.
     auto beforeDelete = vsg::clock::now();
     auto memoryDeleted = vsg::Allocator::instance()->deleteEmptyMemoryBlocks();
     double deleteDuration = std::chrono::duration<double, std::chrono::milliseconds::period>(vsg::clock::now() - beforeDelete).count();
 
-    std::cout<<"\nAfter delete of empty memory blocks, where "<<memoryDeleted<<" was freed."<<std::endl;
+    std::cout << "\nAfter delete of empty memory blocks, where " << memoryDeleted << " was freed." << std::endl;
     vsg::Allocator::instance()->report(std::cout);
 
-    std::cout << "\nload duration = " << loadDuration << "ms"<<std::endl;
-    std::cout << "release duration  = " << releaseDuration << "ms"<<std::endl;
-    std::cout << "delete duration  = " << deleteDuration << "ms"<<std::endl;
-    std::cout << "Average frame rate = " << frameRate << "fps"<<std::endl;
+    std::cout << "\nload duration = " << loadDuration << "ms" << std::endl;
+    std::cout << "release duration  = " << releaseDuration << "ms" << std::endl;
+    std::cout << "delete duration  = " << deleteDuration << "ms" << std::endl;
+    std::cout << "Average frame rate = " << frameRate << "fps" << std::endl;
     return 0;
 }
